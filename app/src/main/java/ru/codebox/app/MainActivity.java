@@ -2,209 +2,184 @@ package ru.codebox.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Bundle;
-import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.util.Arrays;
 
 public class MainActivity extends Activity {
 
-    private LinearLayout layout;
+    private ProjectManager projectManager;
+    private LinearLayout projectContainer;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        projectManager = new ProjectManager(this);
         showHome();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (projectContainer != null) {
+            showProjects();
+        }
+    }
+
     private void showHome() {
-        layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(32, 48, 32, 32);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(24, 40, 24, 24);
 
         TextView title = new TextView(this);
         title.setText("CodeBox 5");
         title.setTextSize(30);
-        layout.addView(title);
+        root.addView(title);
 
         TextView subtitle = new TextView(this);
         subtitle.setText("Android Java IDE");
         subtitle.setTextSize(18);
-        layout.addView(subtitle);
+        root.addView(subtitle);
 
-        Button create = new Button(this);
-        create.setText("Создать новый проект");
-        layout.addView(create);
+        Button createButton = new Button(this);
+        createButton.setText("Создать новый проект");
+        root.addView(createButton);
 
-        create.setOnClickListener(v -> showCreateDialog());
+        createButton.setOnClickListener(
+                v -> showCreateProjectDialog()
+        );
 
-        setContentView(layout);
+        TextView projectsTitle = new TextView(this);
+        projectsTitle.setText("Мои проекты");
+        projectsTitle.setTextSize(22);
+        projectsTitle.setPadding(0, 24, 0, 12);
+        root.addView(projectsTitle);
+
+        ScrollView scrollView = new ScrollView(this);
+
+        projectContainer = new LinearLayout(this);
+        projectContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        scrollView.addView(projectContainer);
+
+        root.addView(
+                scrollView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1
+                )
+        );
+
+        setContentView(root);
+        showProjects();
     }
 
-    private void showCreateDialog() {
-        EditText input = new EditText(this);
-        input.setHint("Название проекта");
-        input.setSingleLine(true);
-        input.setPadding(32, 20, 32, 20);
+    private void showProjects() {
+        projectContainer.removeAllViews();
 
-        new AlertDialog.Builder(this)
-                .setTitle("Новый проект")
-                .setView(input)
-                .setPositiveButton("Создать", (dialog, which) -> {
-                    String name = input.getText().toString().trim();
+        File[] projects = projectManager.getProjects();
 
-                    if (!name.matches("[a-zA-Z][a-zA-Z0-9_]{0,49}")) {
-                        Toast.makeText(this,
-                                "Используй латинские буквы, цифры и _",
-                                Toast.LENGTH_LONG).show();
-                        return;
-                    }
+        Arrays.sort(projects,
+                (a, b) -> a.getName()
+                        .compareToIgnoreCase(b.getName())
+        );
 
-                    createProject(name);
-                })
-                .setNegativeButton("Отмена", null)
-                .show();
-    }
-
-    private void createProject(String name) {
-        File root = new File(getFilesDir(), "projects");
-        File project = new File(root, name);
-
-        if (project.exists()) {
-            Toast.makeText(this,
-                    "Проект уже существует",
-                    Toast.LENGTH_SHORT).show();
+        if (projects.length == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("Пока нет проектов");
+            empty.setTextSize(16);
+            projectContainer.addView(empty);
             return;
         }
 
-        File javaDir = new File(project,
-                "app/src/main/java/com/example/" + name.toLowerCase());
+        for (File project : projects) {
+            Button button = new Button(this);
+            button.setText("📁 " + project.getName());
+            button.setAllCaps(false);
 
-        File resDir = new File(project,
-                "app/src/main/res/layout");
+            button.setOnClickListener(
+                    v -> openProject(project.getName())
+            );
 
-        try {
-            if (!javaDir.mkdirs() || !resDir.mkdirs()) {
-                throw new Exception("Не удалось создать папки");
-            }
-
-            String packageName = "com.example." + name.toLowerCase();
-
-            writeFile(new File(project, "settings.gradle"),
-                    "pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\n"
-                    + "dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\n"
-                    + "rootProject.name = '" + name + "'\n"
-                    + "include ':app'\n");
-
-            writeFile(new File(project, "build.gradle"),
-                    "plugins {\n"
-                    + "    id 'com.android.application' version '8.7.3' apply false\n"
-                    + "}\n");
-
-            writeFile(new File(project, "app/build.gradle"),
-                    "plugins { id 'com.android.application' }\n"
-                    + "android {\n"
-                    + "    namespace '" + packageName + "'\n"
-                    + "    compileSdk 35\n"
-                    + "    defaultConfig {\n"
-                    + "        applicationId '" + packageName + "'\n"
-                    + "        minSdk 26\n"
-                    + "        targetSdk 28\n"
-                    + "        versionCode 1\n"
-                    + "        versionName '1.0'\n"
-                    + "    }\n"
-                    + "}\n");
-
-            writeFile(new File(project,
-                    "app/src/main/AndroidManifest.xml"),
-                    "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-                    + "    <application android:theme=\"@android:style/Theme.Material.Light.NoActionBar\" android:label=\"" + name + "\">\n"
-                    + "        <activity android:name=\".MainActivity\" android:exported=\"true\">\n"
-                    + "            <intent-filter>\n"
-                    + "                <action android:name=\"android.intent.action.MAIN\" />\n"
-                    + "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
-                    + "            </intent-filter>\n"
-                    + "        </activity>\n"
-                    + "    </application>\n"
-                    + "</manifest>\n");
-
-            writeFile(new File(javaDir, "MainActivity.java"),
-                    "package " + packageName + ";\n\n"
-                    + "import android.app.Activity;\n"
-                    + "import android.os.Bundle;\n"
-                    + "import android.widget.TextView;\n\n"
-                    + "public class MainActivity extends Activity {\n"
-                    + "    @Override\n"
-                    + "    protected void onCreate(Bundle state) {\n"
-                    + "        super.onCreate(state);\n"
-                    + "        TextView text = new TextView(this);\n"
-                    + "        text.setText(\"Hello from " + name + "!\");\n"
-                    + "        text.setTextSize(24);\n"
-                    + "        setContentView(text);\n"
-                    + "    }\n"
-                    + "}\n");
-
-            showProject(name, project);
-
-        } catch (Exception e) {
-            Toast.makeText(this,
-                    "Ошибка: " + e.getMessage(),
-                    Toast.LENGTH_LONG).show();
+            projectContainer.addView(button);
         }
     }
 
-    private void writeFile(File file, String content) throws Exception {
-        File parent = file.getParentFile();
+    private void showCreateProjectDialog() {
+        EditText input = new EditText(this);
+        input.setHint("Например: MyApp");
+        input.setSingleLine(true);
 
-        if (parent != null && !parent.exists() && !parent.mkdirs()) {
-            throw new Exception("Не удалось создать папку");
-        }
+        LinearLayout container = new LinearLayout(this);
+        container.setPadding(32, 16, 32, 8);
+        container.addView(input);
 
-        try (FileOutputStream output = new FileOutputStream(file)) {
-            output.write(content.getBytes(StandardCharsets.UTF_8));
-        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Новый Android-проект")
+                .setView(container)
+                .setPositiveButton("Создать", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(
+                    AlertDialog.BUTTON_POSITIVE
+            ).setOnClickListener(v -> {
+
+                String name = input.getText()
+                        .toString().trim();
+
+                if (!name.matches(
+                        "[a-zA-Z][a-zA-Z0-9_]{0,49}"
+                )) {
+                    input.setError(
+                            "Латинские буквы, цифры и _"
+                    );
+                    return;
+                }
+
+                try {
+                    projectManager.createProject(name);
+
+                    Toast.makeText(this,
+                            "Проект создан: " + name,
+                            Toast.LENGTH_SHORT).show();
+
+                    dialog.dismiss();
+                    showProjects();
+                    openProject(name);
+
+                } catch (IOException e) {
+                    Toast.makeText(this,
+                            "Ошибка: " + e.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+
+        dialog.show();
     }
 
-    private void showProject(String name, File project) {
-        LinearLayout screen = new LinearLayout(this);
-        screen.setOrientation(LinearLayout.VERTICAL);
-        screen.setPadding(32, 48, 32, 32);
+    private void openProject(String projectName) {
+        Intent intent = new Intent(
+                this, ProjectActivity.class
+        );
 
-        TextView title = new TextView(this);
-        title.setText("Проект: " + name);
-        title.setTextSize(26);
-        screen.addView(title);
-
-        TextView info = new TextView(this);
-        info.setText("\nПроект успешно создан!\n\n"
-                + "Созданы файлы:\n"
-                + "settings.gradle\n"
-                + "build.gradle\n"
-                + "app/build.gradle\n"
-                + "AndroidManifest.xml\n"
-                + "MainActivity.java\n\n"
-                + "Путь:\n" + project.getAbsolutePath());
-        info.setTextSize(15);
-        screen.addView(info);
-
-        Button back = new Button(this);
-        back.setText("На главную");
-        screen.addView(back);
-
-        back.setOnClickListener(v -> showHome());
-
-        setContentView(screen);
-    }
-
-    @Override
-    public void onBackPressed() {
-        showHome();
+        intent.putExtra("project_name", projectName);
+        startActivity(intent);
     }
 }

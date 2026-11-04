@@ -1,7 +1,8 @@
+
 package ru.codebox.app;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -10,7 +11,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 
 public class ProjectActivity extends Activity {
@@ -26,11 +26,10 @@ public class ProjectActivity extends Activity {
                 getIntent().getStringExtra("project_name");
 
         if (projectName == null ||
-                !projectName.matches("[a-zA-Z][a-zA-Z0-9_]{0,49}")) {
-            Toast.makeText(this,
-                    "Неверное имя проекта",
-                    Toast.LENGTH_LONG).show();
-            finish();
+                !projectName.matches(
+                        "[a-zA-Z][a-zA-Z0-9_]{0,49}"
+                )) {
+            showError("Неверное имя проекта");
             return;
         }
 
@@ -40,10 +39,7 @@ public class ProjectActivity extends Activity {
         );
 
         if (!projectDirectory.isDirectory()) {
-            Toast.makeText(this,
-                    "Проект не найден",
-                    Toast.LENGTH_LONG).show();
-            finish();
+            showError("Проект не найден");
             return;
         }
 
@@ -56,21 +52,31 @@ public class ProjectActivity extends Activity {
         root.setPadding(24, 32, 24, 24);
 
         TextView title = new TextView(this);
-        title.setText("Проект: " + projectDirectory.getName());
+        title.setText(
+                "Проект: " + projectDirectory.getName()
+        );
         title.setTextSize(24);
         root.addView(title);
 
-        Button backButton = new Button(this);
-        backButton.setText("Назад");
-        backButton.setOnClickListener(v -> finish());
-        root.addView(backButton);
+        Button back = new Button(this);
+        back.setText("Назад");
+        back.setOnClickListener(v -> finish());
+        root.addView(back);
 
-        ScrollView scrollView = new ScrollView(this);
+        ScrollView scroll = new ScrollView(this);
+
         fileContainer = new LinearLayout(this);
-        fileContainer.setOrientation(LinearLayout.VERTICAL);
+        fileContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
-        scrollView.addView(fileContainer);
-        root.addView(scrollView);
+        scroll.addView(fileContainer);
+
+        root.addView(scroll,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0, 1
+                ));
 
         setContentView(root);
 
@@ -88,13 +94,16 @@ public class ProjectActivity extends Activity {
             if (a.isDirectory() != b.isDirectory()) {
                 return a.isDirectory() ? -1 : 1;
             }
-            return a.getName().compareToIgnoreCase(b.getName());
+            return a.getName()
+                    .compareToIgnoreCase(b.getName());
         });
 
         for (File file : files) {
             Button button = new Button(this);
 
-            String prefix = file.isDirectory() ? "📁 " : "📄 ";
+            String prefix = file.isDirectory()
+                    ? "📁 " : "📄 ";
+
             button.setText(prefix + file.getName());
             button.setAllCaps(false);
 
@@ -108,34 +117,54 @@ public class ProjectActivity extends Activity {
             if (file.isDirectory()) {
                 showFiles(file, level + 1);
             } else {
-                button.setOnClickListener(v -> openFile(file));
+                button.setOnClickListener(
+                        v -> openEditor(file)
+                );
             }
         }
     }
 
-    private void openFile(File file) {
+    private void openEditor(File file) {
         try {
-            String content = FileUtils.readText(file);
+            String rootPath =
+                    projectDirectory.getCanonicalPath();
 
-            TextView text = new TextView(this);
-            text.setText(content);
-            text.setTextSize(14);
-            text.setPadding(24, 24, 24, 24);
-            text.setTextIsSelectable(true);
+            String filePath = file.getCanonicalPath();
 
-            ScrollView scroll = new ScrollView(this);
-            scroll.addView(text);
+            if (!filePath.startsWith(
+                    rootPath + File.separator
+            )) {
+                showError("Файл вне проекта");
+                return;
+            }
 
-            new AlertDialog.Builder(this)
-                    .setTitle(file.getName())
-                    .setView(scroll)
-                    .setPositiveButton("Закрыть", null)
-                    .show();
+            String relativePath =
+                    filePath.substring(rootPath.length() + 1);
 
-        } catch (IOException e) {
-            Toast.makeText(this,
-                    "Ошибка чтения: " + e.getMessage(),
-                    Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(
+                    this, CodeEditorActivity.class
+            );
+
+            intent.putExtra(
+                    "project_name",
+                    projectDirectory.getName()
+            );
+
+            intent.putExtra(
+                    "file_path",
+                    relativePath
+            );
+
+            startActivity(intent);
+
+        } catch (Exception e) {
+            showError("Ошибка: " + e.getMessage());
         }
+    }
+
+    private void showError(String message) {
+        Toast.makeText(
+                this, message, Toast.LENGTH_LONG
+        ).show();
     }
 }

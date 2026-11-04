@@ -8,6 +8,7 @@ import android.graphics.Typeface;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -25,10 +26,10 @@ import java.util.List;
 public class CodeLibraryActivity extends Activity {
 
     private CodeLibraryManager manager;
+    private GradleProjectManager gradleManager;
 
     private LinearLayout root;
     private LinearLayout content;
-
     private Spinner projectSpinner;
 
     private String selectedProject = "";
@@ -48,6 +49,8 @@ public class CodeLibraryActivity extends Activity {
 
         try {
             manager = new CodeLibraryManager(this);
+            gradleManager =
+                    new GradleProjectManager(this);
         } catch (IOException e) {
             showError(e.getMessage());
             return;
@@ -118,13 +121,11 @@ public class CodeLibraryActivity extends Activity {
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
 
-        Button snippetsButton = new Button(this);
-        snippetsButton.setText("📄 Шаблоны");
-        snippetsButton.setAllCaps(false);
+        Button snippetsButton =
+                createButton("📄 Шаблоны");
 
-        Button gradleButton = new Button(this);
-        gradleButton.setText("📦 Gradle");
-        gradleButton.setAllCaps(false);
+        Button gradleButton =
+                createButton("📦 Gradle");
 
         tabs.addView(
                 snippetsButton,
@@ -163,9 +164,8 @@ public class CodeLibraryActivity extends Activity {
                 )
         );
 
-        Button backButton = new Button(this);
-        backButton.setText("← Назад");
-        backButton.setAllCaps(false);
+        Button backButton =
+                createButton("← Назад");
 
         root.addView(
                 backButton,
@@ -184,17 +184,17 @@ public class CodeLibraryActivity extends Activity {
             refreshContent();
         });
 
-        backButton.setOnClickListener(v -> finish());
+        backButton.setOnClickListener(
+                v -> finish()
+        );
 
         setContentView(root);
-
         refreshContent();
     }
 
     private void setupProjects() {
 
         List<String> projects = new ArrayList<>();
-
         projects.add("Все проекты");
 
         File projectsRoot = new File(
@@ -217,8 +217,7 @@ public class CodeLibraryActivity extends Activity {
         ArrayAdapter<String> adapter =
                 new ArrayAdapter<>(
                         this,
-                        android.R.layout
-                                .simple_spinner_item,
+                        android.R.layout.simple_spinner_item,
                         projects
                 );
 
@@ -242,12 +241,11 @@ public class CodeLibraryActivity extends Activity {
         projectSpinner.setSelection(initialPosition);
 
         projectSpinner.setOnItemSelectedListener(
-                new android.widget.AdapterView
-                        .OnItemSelectedListener() {
+                new AdapterView.OnItemSelectedListener() {
 
             @Override
             public void onItemSelected(
-                    android.widget.AdapterView<?> parent,
+                    AdapterView<?> parent,
                     View view,
                     int position,
                     long id) {
@@ -263,7 +261,7 @@ public class CodeLibraryActivity extends Activity {
 
             @Override
             public void onNothingSelected(
-                    android.widget.AdapterView<?> parent) {
+                    AdapterView<?> parent) {
             }
         });
     }
@@ -434,7 +432,6 @@ public class CodeLibraryActivity extends Activity {
         EditText name = new EditText(this);
         name.setHint("Название шаблона");
         name.setSingleLine(true);
-
         layout.addView(name);
 
         Spinner language = new Spinner(this);
@@ -446,8 +443,7 @@ public class CodeLibraryActivity extends Activity {
         ArrayAdapter<String> adapter =
                 new ArrayAdapter<>(
                         this,
-                        android.R.layout
-                                .simple_spinner_item,
+                        android.R.layout.simple_spinner_item,
                         languages
                 );
 
@@ -537,6 +533,41 @@ public class CodeLibraryActivity extends Activity {
             return;
         }
 
+        content.addView(
+                createLabel(
+                        "Проект: " + selectedProject
+                )
+        );
+
+        Button createGradleButton = createButton(
+                "🛠 Создать Gradle-структуру"
+        );
+
+        content.addView(createGradleButton);
+
+        createGradleButton.setOnClickListener(
+                v -> confirmCreateGradle()
+        );
+
+        Button applyButton = createButton(
+                "✅ Применить зависимости"
+        );
+
+        content.addView(applyButton);
+
+        applyButton.setOnClickListener(
+                v -> confirmApplyDependencies()
+        );
+
+        content.addView(
+                createLabel(
+                        "Gradle-файлы создаются только "
+                                + "при их отсутствии. "
+                                + "Применение добавляет "
+                                + "зависимости в app/build.gradle."
+                )
+        );
+
         Button addButton = createButton(
                 "+ Добавить Gradle-библиотеку"
         );
@@ -609,7 +640,134 @@ public class CodeLibraryActivity extends Activity {
         }
     }
 
+    private void confirmCreateGradle() {
+
+        final String projectName = selectedProject;
+
+        if (projectName.isEmpty()) {
+            showToast("Сначала выбери проект");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Создать Gradle-структуру?")
+                .setMessage(
+                        "Проект: " + projectName
+                                + "\n\nБудут созданы "
+                                + "недостающие Gradle-файлы "
+                                + "и AndroidManifest.xml."
+                                + "\n\nСуществующие файлы "
+                                + "не будут перезаписаны."
+                )
+                .setPositiveButton(
+                        "Создать",
+                        (dialog, which) -> {
+                            try {
+                                gradleManager
+                                        .ensureGradleStructure(
+                                                projectName
+                                        );
+
+                                showToast(
+                                        "Gradle-структура проверена"
+                                );
+
+                                refreshContent();
+
+                            } catch (IOException e) {
+                                showToast(
+                                        "Ошибка: "
+                                                + e.getMessage()
+                                );
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void confirmApplyDependencies() {
+
+        final String projectName = selectedProject;
+
+        if (projectName.isEmpty()) {
+            showToast("Сначала выбери проект");
+            return;
+        }
+
+        final List<String> dependencies;
+
+        try {
+            dependencies = manager.getDependencies(
+                    projectName
+            );
+        } catch (IOException e) {
+            showToast(e.getMessage());
+            return;
+        }
+
+        if (dependencies.isEmpty()) {
+            showToast(
+                    "Сначала добавь зависимости"
+            );
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Применить зависимости?")
+                .setMessage(
+                        "Проект: " + projectName
+                                + "\nЗависимостей в библиотеке: "
+                                + dependencies.size()
+                                + "\n\nОни будут добавлены "
+                                + "в app/build.gradle."
+                                + "\n\nПеред изменением "
+                                + "будет создана резервная "
+                                + "копия, если её ещё нет."
+                )
+                .setPositiveButton(
+                        "Применить",
+                        (dialog, which) -> {
+                            try {
+                                int added = gradleManager
+                                        .applyDependencies(
+                                                projectName,
+                                                dependencies
+                                        );
+
+                                new AlertDialog.Builder(this)
+                                        .setTitle(
+                                                "Gradle обновлён"
+                                        )
+                                        .setMessage(
+                                                "Добавлено новых "
+                                                        + "зависимостей: "
+                                                        + added
+                                                        + "\n\n"
+                                                        + "Уже найденные "
+                                                        + "зависимости "
+                                                        + "пропущены."
+                                        )
+                                        .setPositiveButton(
+                                                "OK", null
+                                        )
+                                        .show();
+
+                            } catch (IOException e) {
+                                showToast(
+                                        "Ошибка Gradle: "
+                                                + e.getMessage()
+                                );
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
     private void showAddDependencyDialog() {
+
+        final String projectName = selectedProject;
 
         EditText input = new EditText(this);
 
@@ -623,7 +781,7 @@ public class CodeLibraryActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Добавить Gradle-библиотеку")
                 .setMessage(
-                        "Проект: " + selectedProject
+                        "Проект: " + projectName
                 )
                 .setView(input)
                 .setPositiveButton(
@@ -631,7 +789,7 @@ public class CodeLibraryActivity extends Activity {
                         (dialog, which) -> {
                             try {
                                 manager.addDependency(
-                                        selectedProject,
+                                        projectName,
                                         input.getText()
                                                 .toString()
                                                 .trim()
@@ -651,15 +809,21 @@ public class CodeLibraryActivity extends Activity {
     private void confirmDeleteDependency(
             String dependency) {
 
+        final String projectName = selectedProject;
+
         new AlertDialog.Builder(this)
                 .setTitle("Удалить зависимость?")
-                .setMessage(dependency)
+                .setMessage(
+                        dependency
+                                + "\n\nУдаление из библиотеки "
+                                + "не меняет build.gradle."
+                )
                 .setPositiveButton(
                         "Удалить",
                         (dialog, which) -> {
                             try {
                                 manager.removeDependency(
-                                        selectedProject,
+                                        projectName,
                                         dependency
                                 );
 

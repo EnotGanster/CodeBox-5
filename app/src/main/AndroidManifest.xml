@@ -8,6 +8,11 @@
         android:usesCleartextTraffic="false">
 
         <activity
+            android:name=".CodeEditorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ProjectActivity"
             android:exported="false" />
 

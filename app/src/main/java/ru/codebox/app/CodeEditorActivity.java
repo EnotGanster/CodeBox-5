@@ -26,6 +26,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class CodeEditorActivity extends Activity {
@@ -34,6 +36,7 @@ public class CodeEditorActivity extends Activity {
     private TextView title;
     private File currentFile;
     private String savedContent = "";
+    private String currentProjectName = "";
 
     private EditorHistoryManager historyManager;
     private Button undoButton;
@@ -82,6 +85,8 @@ public class CodeEditorActivity extends Activity {
             showError("Неверные данные файла");
             return;
         }
+
+        currentProjectName = projectName;
 
         try {
             File projectsRoot = new File(
@@ -249,6 +254,22 @@ public class CodeEditorActivity extends Activity {
 
         root.addView(toolbar);
 
+        // Кнопка вставки шаблонов.
+        Button snippetsButton = new Button(this);
+        snippetsButton.setText("📚 Шаблоны Java/XML");
+        snippetsButton.setAllCaps(false);
+
+        root.addView(
+                snippetsButton,
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                )
+        );
+
+        snippetsButton.setOnClickListener(
+                v -> showSnippetPicker()
+        );
+
         TextView info = new TextView(this);
         info.setText(
                 "CodeBox 5  •  Редактор кода"
@@ -321,7 +342,6 @@ public class CodeEditorActivity extends Activity {
 
         setContentView(root);
 
-        // Историю создаём после загрузки файла.
         historyManager = new EditorHistoryManager(
                 editor
         );
@@ -449,8 +469,6 @@ public class CodeEditorActivity extends Activity {
                 editor.invalidate();
                 scheduleHighlight();
 
-                // Обновляем состояние кнопок
-                // после завершения текущего ввода.
                 editor.post(
                         () -> updateHistoryButtons()
                 );
@@ -462,6 +480,194 @@ public class CodeEditorActivity extends Activity {
         );
 
         updateHistoryButtons();
+    }
+
+    // Выбор сохранённого шаблона.
+    private void showSnippetPicker() {
+        if (editor == null || currentFile == null) {
+            return;
+        }
+
+        String filename = currentFile.getName()
+                .toLowerCase(Locale.ROOT);
+
+        String language;
+
+        if (filename.endsWith(".java")) {
+            language = "java";
+        } else if (filename.endsWith(".xml")) {
+            language = "xml";
+        } else {
+            Toast.makeText(
+                    this,
+                    "Шаблоны доступны для Java и XML",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+
+        try {
+            CodeLibraryManager library =
+                    new CodeLibraryManager(this);
+
+            List<CodeLibraryManager.Snippet> all =
+                    library.getSnippets(
+                            currentProjectName
+                    );
+
+            List<CodeLibraryManager.Snippet> matches =
+                    new ArrayList<>();
+
+            for (CodeLibraryManager.Snippet snippet : all) {
+                if (language.equals(snippet.language)) {
+                    matches.add(snippet);
+                }
+            }
+
+            if (matches.isEmpty()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("📚 Шаблоны")
+                        .setMessage(
+                                "Нет сохранённых шаблонов "
+                                        + language.toUpperCase(Locale.ROOT)
+                                        + ".\n\nДобавь шаблон "
+                                        + "в библиотеке кода."
+                        )
+                        .setPositiveButton(
+                                "Открыть библиотеку",
+                                (dialog, which) -> {
+                                    Intent intent = new Intent(
+                                            this,
+                                            CodeLibraryActivity.class
+                                    );
+                                    intent.putExtra(
+                                            "project_name",
+                                            currentProjectName
+                                    );
+                                    startActivity(intent);
+                                }
+                        )
+                        .setNegativeButton("Отмена", null)
+                        .show();
+                return;
+            }
+
+            String[] names = new String[matches.size()];
+
+            for (int i = 0; i < matches.size(); i++) {
+                CodeLibraryManager.Snippet snippet =
+                        matches.get(i);
+
+                names[i] = snippet.title
+                        + (snippet.projectName.isEmpty()
+                        ? "  • Общий"
+                        : "  • Проект");
+            }
+
+            new AlertDialog.Builder(this)
+                    .setTitle("📚 Вставить шаблон")
+                    .setItems(
+                            names,
+                            (dialog, which) ->
+                                    confirmSnippetInsertion(
+                                            matches.get(which)
+                                    )
+                    )
+                    .setNegativeButton("Отмена", null)
+                    .show();
+
+        } catch (IOException e) {
+            Toast.makeText(
+                    this,
+                    "Ошибка библиотеки: " + e.getMessage(),
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+    private void confirmSnippetInsertion(
+            CodeLibraryManager.Snippet snippet) {
+
+        String preview = snippet.code;
+
+        if (preview.length() > 700) {
+            preview = preview.substring(0, 700)
+                    + "\n...";
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(snippet.title)
+                .setMessage(preview)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton(
+                        "Вставить",
+                        (dialog, which) ->
+                                insertSnippet(snippet.code)
+                )
+                .show();
+    }
+
+    private void insertSnippet(String code) {
+        if (editor == null || code == null) {
+            return;
+        }
+
+        Editable content = editor.getText();
+
+        if (content == null) {
+            return;
+        }
+
+        int start = Math.max(
+                0,
+                Math.min(
+                        editor.getSelectionStart(),
+                        content.length()
+                )
+        );
+
+        int end = Math.max(
+                0,
+                Math.min(
+                        editor.getSelectionEnd(),
+                        content.length()
+                )
+        );
+
+        if (start > end) {
+            int temp = start;
+            start = end;
+            end = temp;
+        }
+
+        internalEdit = true;
+
+        try {
+            content.replace(start, end, code);
+
+            editor.setSelection(
+                    Math.min(
+                            start + code.length(),
+                            content.length()
+                    )
+            );
+        } finally {
+            internalEdit = false;
+        }
+
+        updateTitle();
+        editor.invalidate();
+        scheduleHighlight();
+
+        editor.post(
+                () -> updateHistoryButtons()
+        );
+
+        Toast.makeText(
+                this,
+                "Шаблон вставлен",
+                Toast.LENGTH_SHORT
+        ).show();
     }
 
     private void scheduleHighlight() {

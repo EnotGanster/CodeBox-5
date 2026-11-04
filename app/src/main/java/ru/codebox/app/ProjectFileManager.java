@@ -158,10 +158,20 @@ public final class ProjectFileManager {
                 || name.equals("..")
                 || name.contains("/")
                 || name.contains("\\")
-                || !name.matches("[A-Za-z0-9_.-]+")) {
+                || name.indexOf('\0') >= 0
+                || name.matches(".*[\\p{Cntrl}].*")) {
 
             throw new IOException(
                     "Недопустимое имя файла или папки"
+            );
+        }
+
+        if (name.endsWith(" ")
+                || name.endsWith(".")) {
+
+            throw new IOException(
+                    "Имя не должно заканчиваться "
+                            + "пробелом или точкой"
             );
         }
     }

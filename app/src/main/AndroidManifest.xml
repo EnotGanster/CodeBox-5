@@ -8,6 +8,10 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
+            android:name=".ImageViewerActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".GraphicsEditorActivity"
             android:exported="false" />
 

@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.app.Activity;
@@ -19,9 +18,8 @@ public final class ProjectScreen {
         void onUp();
         void onNewFile();
         void onNewFolder();
+        void onGraphics();
         void onFileSelected(File file);
-
-        // Новое действие: долгое нажатие
         void onFileLongPressed(File file);
     }
 
@@ -35,6 +33,7 @@ public final class ProjectScreen {
     public ProjectScreen(
             Activity activity,
             Listener listener) {
+
         this.activity = activity;
         this.listener = listener;
     }
@@ -44,9 +43,12 @@ public final class ProjectScreen {
     }
 
     private TextView text(
-            String value, int size, boolean bold) {
+            String value,
+            int size,
+            boolean bold) {
 
         TextView view = new TextView(activity);
+
         view.setText(value);
         view.setTextSize(size);
         view.setTextColor(
@@ -65,8 +67,13 @@ public final class ProjectScreen {
 
     public View create(String projectName) {
 
-        LinearLayout root = new LinearLayout(activity);
-        root.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root =
+                new LinearLayout(activity);
+
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
         root.setBackgroundColor(
                 CodeBoxTheme.background(activity)
         );
@@ -80,13 +87,23 @@ public final class ProjectScreen {
     }
 
     private void createHeader(
-            LinearLayout root, String projectName) {
+            LinearLayout root,
+            String projectName) {
 
-        LinearLayout header = new LinearLayout(activity);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout header =
+                new LinearLayout(activity);
+
+        header.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        header.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
         header.setPadding(
-                dp(16), dp(20), dp(16), dp(20)
+                dp(16), dp(20),
+                dp(16), dp(20)
         );
 
         GradientDrawable background =
@@ -100,7 +117,10 @@ public final class ProjectScreen {
 
         header.setBackground(background);
 
-        TextView back = text("‹", 36, true);
+        TextView back = text(
+                "‹", 36, true
+        );
+
         back.setTextColor(0xFFFFFFFF);
         back.setGravity(Gravity.CENTER);
 
@@ -115,8 +135,12 @@ public final class ProjectScreen {
                 v -> listener.onBack()
         );
 
-        LinearLayout labels = new LinearLayout(activity);
-        labels.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout labels =
+                new LinearLayout(activity);
+
+        labels.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
         TextView title = text(
                 projectName, 22, true
@@ -124,8 +148,10 @@ public final class ProjectScreen {
 
         title.setTextColor(0xFFFFFFFF);
         title.setSingleLine(true);
+
         title.setEllipsize(
-                android.text.TextUtils.TruncateAt.END
+                android.text.TextUtils
+                        .TruncateAt.END
         );
 
         labels.addView(title);
@@ -136,7 +162,10 @@ public final class ProjectScreen {
                 false
         );
 
-        subtitle.setTextColor(0xFFECE3FF);
+        subtitle.setTextColor(
+                0xFFECE3FF
+        );
+
         labels.addView(subtitle);
 
         header.addView(
@@ -149,15 +178,25 @@ public final class ProjectScreen {
         root.addView(header);
     }
 
-    private void createPathBar(LinearLayout root) {
+    private void createPathBar(
+            LinearLayout root) {
 
-        LinearLayout panel = new LinearLayout(activity);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(
-                dp(18), dp(16), dp(18), dp(12)
+        LinearLayout panel =
+                new LinearLayout(activity);
+
+        panel.setOrientation(
+                LinearLayout.VERTICAL
         );
 
-        pathText = text("/", 14, true);
+        panel.setPadding(
+                dp(18), dp(16),
+                dp(18), dp(12)
+        );
+
+        pathText = text(
+                "/", 14, true
+        );
+
         pathText.setTextColor(
                 CodeBoxTheme.PURPLE
         );
@@ -175,21 +214,28 @@ public final class ProjectScreen {
         );
 
         panel.addView(countText);
+
         root.addView(panel);
     }
 
-    private void createFileArea(LinearLayout root) {
+    private void createFileArea(
+            LinearLayout root) {
 
-        ScrollView scroll = new ScrollView(activity);
+        ScrollView scroll =
+                new ScrollView(activity);
+
         scroll.setFillViewport(true);
 
-        fileContainer = new LinearLayout(activity);
+        fileContainer =
+                new LinearLayout(activity);
+
         fileContainer.setOrientation(
                 LinearLayout.VERTICAL
         );
 
         fileContainer.setPadding(
-                dp(16), dp(4), dp(16), dp(12)
+                dp(16), dp(4),
+                dp(16), dp(12)
         );
 
         scroll.addView(fileContainer);
@@ -202,12 +248,19 @@ public final class ProjectScreen {
         );
     }
 
-    private void createBottomBar(LinearLayout root) {
+    private void createBottomBar(
+            LinearLayout root) {
 
-        LinearLayout bar = new LinearLayout(activity);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout bar =
+                new LinearLayout(activity);
+
+        bar.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
         bar.setPadding(
-                dp(12), dp(12), dp(12), dp(12)
+                dp(8), dp(12),
+                dp(8), dp(12)
         );
 
         bar.setBackgroundColor(
@@ -235,6 +288,13 @@ public final class ProjectScreen {
                 listener::onNewFolder
         );
 
+        addAction(
+                bar,
+                "🎨",
+                0xFFD94444,
+                listener::onGraphics
+        );
+
         root.addView(bar);
     }
 
@@ -245,11 +305,15 @@ public final class ProjectScreen {
             Runnable action) {
 
         TextView button = text(
-                title, 13, true
+                title, 12, true
         );
 
         CodeBoxTheme.styleColoredButton(
                 button, color
+        );
+
+        button.setGravity(
+                Gravity.CENTER
         );
 
         LinearLayout.LayoutParams params =
@@ -258,10 +322,13 @@ public final class ProjectScreen {
                 );
 
         params.setMargins(
-                dp(3), 0, dp(3), 0
+                dp(2), 0,
+                dp(2), 0
         );
 
-        parent.addView(button, params);
+        parent.addView(
+                button, params
+        );
 
         button.setOnClickListener(
                 v -> action.run()
@@ -269,7 +336,8 @@ public final class ProjectScreen {
     }
 
     public void updatePath(
-            String relativePath, int count) {
+            String relativePath,
+            int count) {
 
         if (pathText != null) {
             pathText.setText(
@@ -292,7 +360,8 @@ public final class ProjectScreen {
 
         fileContainer.removeAllViews();
 
-        if (files == null || files.length == 0) {
+        if (files == null ||
+                files.length == 0) {
 
             TextView empty = text(
                     "В этой папке пока нет файлов",
@@ -300,7 +369,9 @@ public final class ProjectScreen {
                     false
             );
 
-            empty.setGravity(Gravity.CENTER);
+            empty.setGravity(
+                    Gravity.CENTER
+            );
 
             empty.setPadding(
                     dp(12), dp(48),
@@ -336,7 +407,8 @@ public final class ProjectScreen {
 
         CodeBoxTheme.styleCard(card);
 
-        boolean folder = file.isDirectory();
+        boolean folder =
+                file.isDirectory();
 
         TextView symbol = text(
                 folder ? "📁" : "📄",
@@ -344,7 +416,9 @@ public final class ProjectScreen {
                 false
         );
 
-        symbol.setGravity(Gravity.CENTER);
+        symbol.setGravity(
+                Gravity.CENTER
+        );
 
         card.addView(
                 symbol,
@@ -371,6 +445,7 @@ public final class ProjectScreen {
         );
 
         name.setMaxLines(2);
+
         labels.addView(name);
 
         TextView type = text(
@@ -407,18 +482,20 @@ public final class ProjectScreen {
                         -1, -2
                 );
 
-        params.bottomMargin = dp(10);
+        params.bottomMargin =
+                dp(10);
 
         fileContainer.addView(
                 card, params
         );
 
-        // Обычное нажатие: открыть файл или папку.
+        // Обычное нажатие.
         card.setOnClickListener(
                 v -> listener.onFileSelected(file)
         );
 
-        // Долгое нажатие: меню действий.
+        // Долгое нажатие:
+        // меню действий с файлом.
         card.setOnLongClickListener(v -> {
             listener.onFileLongPressed(file);
             return true;

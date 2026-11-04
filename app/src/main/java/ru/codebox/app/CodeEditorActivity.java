@@ -35,9 +35,15 @@ public class CodeEditorActivity extends Activity {
     private File currentFile;
     private String savedContent = "";
 
-    private boolean insertingIndent = false;
+    private boolean internalEdit = false;
     private boolean pendingIndent = false;
     private int indentPosition = -1;
+
+    private char pendingPair = 0;
+    private int pairPosition = -1;
+
+    private boolean pendingSkip = false;
+    private int skipPosition = -1;
 
     private final Runnable highlightTask = () -> {
         if (editor != null && currentFile != null) {
@@ -289,6 +295,10 @@ public class CodeEditorActivity extends Activity {
                     int start,
                     int count,
                     int after) {
+
+                pendingIndent = false;
+                pendingPair = 0;
+                pendingSkip = false;
             }
 
             @Override
@@ -298,13 +308,49 @@ public class CodeEditorActivity extends Activity {
                     int before,
                     int count) {
 
-                if (!insertingIndent &&
-                        count == 1 &&
-                        start < s.length() &&
-                        s.charAt(start) == '\n') {
+                if (internalEdit ||
+                        before != 0 ||
+                        count != 1 ||
+                        start >= s.length()) {
+                    return;
+                }
 
+                char typed = s.charAt(start);
+
+                if (typed == '\n') {
                     pendingIndent = true;
                     indentPosition = start + 1;
+                    return;
+                }
+
+                char closing = matchingClose(typed);
+
+                if (closing == 0) {
+                    return;
+                }
+
+                // Автопара работает только при
+                // обычном вводе одного символа.
+                if (editor.getSelectionStart()
+                        != start + 1) {
+                    return;
+                }
+
+                // Если справа уже стоит такая
+                // закрывающая скобка или кавычка,
+                // перемещаем курсор вместо дублирования.
+                if (isClosingCharacter(typed)
+                        && start + 1 < s.length()
+                        && s.charAt(start + 1) == typed) {
+
+                    pendingSkip = true;
+                    skipPosition = start;
+                    return;
+                }
+
+                if (isOpeningCharacter(typed)) {
+                    pendingPair = closing;
+                    pairPosition = start + 1;
                 }
             }
 
@@ -312,11 +358,26 @@ public class CodeEditorActivity extends Activity {
             public void afterTextChanged(
                     Editable s) {
 
-                if (insertingIndent) {
+                if (internalEdit) {
                     return;
                 }
 
-                if (pendingIndent) {
+                if (pendingSkip) {
+                    pendingSkip = false;
+                    skipExistingClosing(
+                            s, skipPosition
+                    );
+
+                } else if (pendingPair != 0) {
+                    char closing = pendingPair;
+                    int position = pairPosition;
+                    pendingPair = 0;
+
+                    insertClosingPair(
+                            s, position, closing
+                    );
+
+                } else if (pendingIndent) {
                     pendingIndent = false;
                     applyAutoIndent(
                             s, indentPosition
@@ -336,6 +397,91 @@ public class CodeEditorActivity extends Activity {
         CodeSyntaxHighlighter.highlight(
                 editor, currentFile.getName()
         );
+    }
+
+    private char matchingClose(char c) {
+        switch (c) {
+            case '(':
+                return ')';
+            case '[':
+                return ']';
+            case '{':
+                return '}';
+            case '"':
+                return '"';
+            case '\'':
+                return '\'';
+            default:
+                return 0;
+        }
+    }
+
+    private boolean isOpeningCharacter(char c) {
+        return c == '(' || c == '[' || c == '{'
+                || c == '"' || c == '\'';
+    }
+
+    private boolean isClosingCharacter(char c) {
+        return c == ')' || c == ']' || c == '}'
+                || c == '"' || c == '\'';
+    }
+
+    private void insertClosingPair(
+            Editable text,
+            int position,
+            char closing) {
+
+        if (position < 0 ||
+                position > text.length()) {
+            return;
+        }
+
+        // Не создаём лишнюю закрывающую
+        // скобку, если она уже находится справа.
+        if (position < text.length()
+                && text.charAt(position) == closing) {
+            return;
+        }
+
+        internalEdit = true;
+
+        try {
+            text.insert(
+                    position,
+                    String.valueOf(closing)
+            );
+
+            editor.setSelection(position);
+
+        } finally {
+            internalEdit = false;
+        }
+    }
+
+    private void skipExistingClosing(
+            Editable text,
+            int position) {
+
+        if (position < 0 ||
+                position + 1 >= text.length()) {
+            return;
+        }
+
+        internalEdit = true;
+
+        try {
+            text.delete(position, position + 1);
+
+            editor.setSelection(
+                    Math.min(
+                            position + 1,
+                            text.length()
+                    )
+            );
+
+        } finally {
+            internalEdit = false;
+        }
     }
 
     private void applyAutoIndent(
@@ -387,7 +533,7 @@ public class CodeEditorActivity extends Activity {
             return;
         }
 
-        insertingIndent = true;
+        internalEdit = true;
 
         try {
             text.insert(
@@ -401,7 +547,7 @@ public class CodeEditorActivity extends Activity {
                     )
             );
         } finally {
-            insertingIndent = false;
+            internalEdit = false;
         }
     }
 
@@ -561,9 +707,7 @@ public class CodeEditorActivity extends Activity {
             super(CodeEditorActivity.this);
 
             linePaint.setColor(0xFF9999AA);
-            linePaint.setTextSize(
-                    dp(12)
-            );
+            linePaint.setTextSize(dp(12));
             linePaint.setTypeface(
                     Typeface.MONOSPACE
             );
@@ -607,7 +751,10 @@ public class CodeEditorActivity extends Activity {
                 int number) {
 
             int line = layout.getLineForOffset(
-                    Math.min(offset, getText().length())
+                    Math.min(
+                            offset,
+                            getText().length()
+                    )
             );
 
             float y = getTotalPaddingTop()

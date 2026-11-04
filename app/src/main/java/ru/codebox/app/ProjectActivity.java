@@ -4,12 +4,17 @@ package ru.codebox.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.database.Cursor;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -17,6 +22,8 @@ import java.util.Arrays;
 
 public class ProjectActivity extends Activity
         implements ProjectScreen.Listener {
+
+    private static final int PICK_IMAGE = 501;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -27,25 +34,30 @@ public class ProjectActivity extends Activity
     protected void onCreate(Bundle state) {
         super.onCreate(state);
 
-        String projectName =
-                getIntent().getStringExtra("project_name");
+        String name = getIntent()
+                .getStringExtra("project_name");
 
-        if (projectName == null ||
-                !projectName.matches(
-                        "[a-zA-Z][a-zA-Z0-9_]{0,49}"
+        if (name == null ||
+                !name.matches(
+                        "[A-Za-z][A-Za-z0-9_]{0,49}"
                 )) {
-            showError("Неверное имя проекта");
+            error("Неверное имя проекта");
             finish();
             return;
         }
 
-        projectDirectory = new File(
-                new File(getFilesDir(), "projects"),
-                projectName
-        );
-
         try {
-            if (!projectDirectory.isDirectory()) {
+            File projects = new File(
+                    getFilesDir(), "projects"
+            ).getCanonicalFile();
+
+            projectDirectory = new File(
+                    projects, name
+            ).getCanonicalFile();
+
+            if (!projectDirectory.getParentFile()
+                    .equals(projects)
+                    || !projectDirectory.isDirectory()) {
                 throw new IOException(
                         "Проект не найден"
                 );
@@ -55,31 +67,14 @@ public class ProjectActivity extends Activity
                     projectDirectory
             );
 
-            projectDirectory =
-                    projectDirectory.getCanonicalFile();
-
             currentDirectory = projectDirectory;
 
         } catch (IOException e) {
-            showError(errorMessage(e));
+            error(message(e));
             finish();
             return;
         }
 
-        buildScreen();
-    }
-
-    private String errorMessage(Exception e) {
-        return e.getMessage() == null
-                ? "Ошибка работы с файлами"
-                : e.getMessage();
-    }
-
-    private int dp(float value) {
-        return CodeBoxTheme.dp(this, value);
-    }
-
-    private void buildScreen() {
         projectScreen = new ProjectScreen(this, this);
 
         setContentView(
@@ -91,50 +86,70 @@ public class ProjectActivity extends Activity
         refreshFiles();
     }
 
-    private boolean isInsideProject(File file)
+    private int dp(float value) {
+        return CodeBoxTheme.dp(this, value);
+    }
+
+    private String message(Exception e) {
+        return e.getMessage() == null
+                ? "Ошибка файловой системы"
+                : e.getMessage();
+    }
+
+    private void error(String value) {
+        Toast.makeText(
+                this, value, Toast.LENGTH_LONG
+        ).show();
+    }
+
+    private boolean inside(File file)
             throws IOException {
 
-        String rootPath =
-                projectDirectory.getCanonicalPath();
+        String root = projectDirectory
+                .getCanonicalPath();
 
-        String filePath =
-                file.getCanonicalPath();
+        String path = file.getCanonicalPath();
 
-        return filePath.startsWith(
-                rootPath + File.separator
+        return path.startsWith(
+                root + File.separator
         );
+    }
+
+    private boolean safeEntry(File file)
+            throws IOException {
+
+        // Объект должен быть непосредственным
+        // элементом открытой папки.
+        if (!file.getAbsoluteFile()
+                .getParentFile()
+                .equals(currentDirectory.getAbsoluteFile())) {
+            return false;
+        }
+
+        // Не допускаем ссылки за пределы проекта.
+        return inside(file);
     }
 
     private void refreshFiles() {
         try {
-            String rootPath =
-                    projectDirectory.getCanonicalPath();
+            String root = projectDirectory
+                    .getCanonicalPath();
 
-            String currentPath =
-                    currentDirectory.getCanonicalPath();
+            String current = currentDirectory
+                    .getCanonicalPath();
 
-            if (!currentPath.equals(rootPath)
-                    && !currentPath.startsWith(
-                            rootPath + File.separator
+            if (!current.equals(root)
+                    && !current.startsWith(
+                            root + File.separator
                     )) {
-
                 currentDirectory = projectDirectory;
-                currentPath = rootPath;
+                current = root;
             }
-
-            String relative =
-                    currentPath.equals(rootPath)
-                            ? "/"
-                            : currentPath.substring(
-                                    rootPath.length()
-                            );
 
             File[] files = currentDirectory.listFiles();
 
             if (files == null) {
-                showError(
-                        "Не удалось прочитать папку"
-                );
+                error("Не удалось открыть папку");
                 return;
             }
 
@@ -142,44 +157,37 @@ public class ProjectActivity extends Activity
                 if (a.isDirectory() != b.isDirectory()) {
                     return a.isDirectory() ? -1 : 1;
                 }
-
                 return a.getName()
-                        .compareToIgnoreCase(
-                                b.getName()
-                        );
+                        .compareToIgnoreCase(b.getName());
             });
 
+            String relative = current.equals(root)
+                    ? "/"
+                    : current.substring(root.length());
+
             projectScreen.updatePath(
-                    relative,
-                    files.length
+                    relative, files.length
             );
 
             projectScreen.showFiles(files);
 
         } catch (IOException e) {
-            showError(errorMessage(e));
+            error(message(e));
         }
     }
 
-    private void showCreateDialog(boolean folder) {
+    private void createDialog(boolean folder) {
         EditText input = new EditText(this);
-
         input.setSingleLine(true);
-
         input.setHint(
-                folder
-                        ? "Например: images"
-                        : "Например: Test.java"
+                folder ? "Например: images"
+                       : "Например: Main.java"
         );
 
-        LinearLayout wrapper =
-                new LinearLayout(this);
-
+        LinearLayout wrapper = new LinearLayout(this);
         wrapper.setPadding(
-                dp(24), dp(12),
-                dp(24), dp(8)
+                dp(24), dp(12), dp(24), dp(8)
         );
-
         wrapper.addView(input);
 
         AlertDialog dialog =
@@ -190,57 +198,418 @@ public class ProjectActivity extends Activity
                                         : "Новый файл"
                         )
                         .setView(wrapper)
-                        .setPositiveButton(
-                                "Создать", null
-                        )
-                        .setNegativeButton(
-                                "Отмена", null
-                        )
+                        .setPositiveButton("Создать", null)
+                        .setNegativeButton("Отмена", null)
                         .create();
 
-        dialog.setOnShowListener(ignored -> {
-            dialog.getButton(
-                    AlertDialog.BUTTON_POSITIVE
-            ).setOnClickListener(v -> {
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(
+                        AlertDialog.BUTTON_POSITIVE
+                ).setOnClickListener(v -> {
+                    String name = input.getText()
+                            .toString().trim();
 
-                String name = input.getText()
-                        .toString()
-                        .trim();
+                    try {
+                        if (folder) {
+                            fileManager.createFolder(
+                                    currentDirectory, name
+                            );
+                        } else {
+                            fileManager.createFile(
+                                    currentDirectory, name, ""
+                            );
+                        }
 
-                try {
-                    if (folder) {
-                        fileManager.createFolder(
-                                currentDirectory,
-                                name
-                        );
-                    } else {
-                        fileManager.createFile(
-                                currentDirectory,
-                                name,
-                                ""
-                        );
+                        dialog.dismiss();
+                        refreshFiles();
+
+                    } catch (IOException e) {
+                        input.setError(message(e));
                     }
-
-                    dialog.dismiss();
-                    refreshFiles();
-
-                    Toast.makeText(
-                            this,
-                            folder
-                                    ? "Папка создана"
-                                    : "Файл создан",
-                            Toast.LENGTH_SHORT
-                    ).show();
-
-                } catch (IOException e) {
-                    input.setError(
-                            errorMessage(e)
-                    );
-                }
-            });
-        });
+                })
+        );
 
         dialog.show();
+    }
+
+    private void openEditor(File file) {
+        try {
+            if (!safeEntry(file)) {
+                error("Недопустимый файл");
+                return;
+            }
+
+            String relative = file.getCanonicalPath()
+                    .substring(
+                            projectDirectory
+                                    .getCanonicalPath()
+                                    .length() + 1
+                    );
+
+            Intent intent = new Intent(
+                    this, CodeEditorActivity.class
+            );
+
+            intent.putExtra(
+                    "project_name",
+                    projectDirectory.getName()
+            );
+
+            intent.putExtra(
+                    "file_path", relative
+            );
+
+            startActivity(intent);
+
+        } catch (IOException e) {
+            error(message(e));
+        }
+    }
+
+    private void showActions(File file) {
+        try {
+            if (!safeEntry(file)) {
+                error("Объект вне папки проекта");
+                return;
+            }
+
+            if (!file.exists()) {
+                error("Объект не найден");
+                refreshFiles();
+                return;
+            }
+
+            new AlertDialog.Builder(this)
+                    .setTitle(file.getName())
+                    .setItems(
+                            new String[]{"Удалить"},
+                            (dialog, which) ->
+                                    confirmDelete(file)
+                    )
+                    .setNegativeButton("Отмена", null)
+                    .show();
+
+        } catch (IOException e) {
+            error(message(e));
+        }
+    }
+
+    private void confirmDelete(File file) {
+        String description = file.isDirectory()
+                ? "Удалить папку «" + file.getName()
+                    + "» вместе со всем содержимым?"
+                : "Удалить файл «" + file.getName()
+                    + "»?";
+
+        new AlertDialog.Builder(this)
+                .setTitle("Подтверждение удаления")
+                .setMessage(
+                        description
+                        + "\n\nОтменить удаление нельзя."
+                )
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton(
+                        "Удалить",
+                        (dialog, which) -> {
+                            try {
+                                if (!safeEntry(file)) {
+                                    throw new IOException(
+                                            "Недопустимый путь"
+                                    );
+                                }
+
+                                deleteTree(file);
+
+                                Toast.makeText(
+                                        this,
+                                        "Удалено",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+
+                            } catch (IOException e) {
+                                error(message(e));
+                            }
+
+                            refreshFiles();
+                        }
+                )
+                .show();
+    }
+
+    private void deleteTree(File file)
+            throws IOException {
+
+        if (!inside(file)) {
+            throw new IOException(
+                    "Удаление вне проекта запрещено"
+            );
+        }
+
+        if (Files.isSymbolicLink(file.toPath())) {
+            throw new IOException(
+                    "Удаление ссылок не поддерживается"
+            );
+        }
+
+        if (!Files.exists(
+                file.toPath(),
+                LinkOption.NOFOLLOW_LINKS
+        )) {
+            throw new IOException(
+                    "Объект не существует"
+            );
+        }
+
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+
+            if (children == null) {
+                throw new IOException(
+                        "Не удалось прочитать папку"
+                );
+            }
+
+            for (File child : children) {
+                deleteTree(child);
+            }
+        }
+
+        Files.delete(file.toPath());
+    }
+
+    private void showGraphicsMenu() {
+        new AlertDialog.Builder(this)
+                .setTitle("Графика")
+                .setItems(
+                        new String[]{
+                                "Добавить изображение из галереи",
+                                "Создать рисунок"
+                        },
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                pickImage();
+                            } else {
+                                openGraphicsEditor();
+                            }
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void pickImage() {
+        Intent intent = new Intent(
+                Intent.ACTION_OPEN_DOCUMENT
+        );
+
+        intent.addCategory(
+                Intent.CATEGORY_OPENABLE
+        );
+
+        intent.setType("image/*");
+
+        try {
+            startActivityForResult(
+                    intent, PICK_IMAGE
+            );
+        } catch (Exception e) {
+            error("Не удалось открыть выбор изображений");
+        }
+    }
+
+    private void openGraphicsEditor() {
+        Intent intent = new Intent(
+                this, GraphicsEditorActivity.class
+        );
+
+        intent.putExtra(
+                "project_name",
+                projectDirectory.getName()
+        );
+
+        try {
+            String relative = currentDirectory
+                    .getCanonicalPath()
+                    .substring(
+                            projectDirectory
+                                    .getCanonicalPath()
+                                    .length()
+                    );
+
+            intent.putExtra(
+                    "folder_path",
+                    relative.startsWith(File.separator)
+                            ? relative.substring(1)
+                            : relative
+            );
+
+            startActivity(intent);
+
+        } catch (IOException e) {
+            error(message(e));
+        }
+    }
+
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data) {
+
+        super.onActivityResult(
+                requestCode, resultCode, data
+        );
+
+        if (requestCode != PICK_IMAGE
+                || resultCode != RESULT_OK
+                || data == null
+                || data.getData() == null) {
+            return;
+        }
+
+        importImage(data.getData());
+    }
+
+    private String imageExtension(Uri uri) {
+        String type = getContentResolver()
+                .getType(uri);
+
+        if ("image/png".equals(type)) {
+            return ".png";
+        }
+        if ("image/webp".equals(type)) {
+            return ".webp";
+        }
+        if ("image/jpeg".equals(type)
+                || "image/jpg".equals(type)) {
+            return ".jpg";
+        }
+
+        return null;
+    }
+
+    private void importImage(Uri uri) {
+        try {
+            String extension = imageExtension(uri);
+
+            if (extension == null) {
+                throw new IOException(
+                        "Поддерживаются PNG, JPG и WebP"
+                );
+            }
+
+            String originalName = "image" + extension;
+
+            try (Cursor cursor =
+                         getContentResolver().query(
+                                 uri,
+                                 new String[]{
+                                         OpenableColumns.DISPLAY_NAME
+                                 },
+                                 null, null, null
+                         )) {
+
+                if (cursor != null
+                        && cursor.moveToFirst()) {
+                    String value = cursor.getString(0);
+                    if (value != null && !value.isEmpty()) {
+                        originalName = value;
+                    }
+                }
+            }
+
+            String base = originalName.replaceAll(
+                    "(?i)\\.(png|jpg|jpeg|webp)$", ""
+            );
+
+            base = base.replaceAll(
+                    "[\\\\/:*?\"<>|\\p{Cntrl}]", "_"
+            ).trim();
+
+            if (base.isEmpty()) {
+                base = "image";
+            }
+
+            if (base.length() > 60) {
+                base = base.substring(0, 60);
+            }
+
+            File destination = null;
+
+            for (int number = 0; number < 10000; number++) {
+                String suffix = number == 0
+                        ? ""
+                        : "_" + number;
+
+                File candidate = new File(
+                        currentDirectory,
+                        base + suffix + extension
+                );
+
+                if (!candidate.exists()) {
+                    destination = candidate;
+                    break;
+                }
+            }
+
+            if (destination == null
+                    || !inside(destination)) {
+                throw new IOException(
+                        "Не удалось выбрать имя файла"
+                );
+            }
+
+            // Ограничиваем размер импортируемого файла.
+            long maxBytes = 30L * 1024 * 1024;
+            long copied = 0;
+
+            try (InputStream input =
+                         getContentResolver()
+                                 .openInputStream(uri)) {
+
+                if (input == null) {
+                    throw new IOException(
+                            "Изображение недоступно"
+                    );
+                }
+
+                try (FileOutputStream output =
+                             new FileOutputStream(destination)) {
+
+                    byte[] buffer = new byte[8192];
+                    int count;
+
+                    while ((count = input.read(buffer)) != -1) {
+                        copied += count;
+
+                        if (copied > maxBytes) {
+                            throw new IOException(
+                                    "Размер изображения больше 30 МБ"
+                            );
+                        }
+
+                        output.write(buffer, 0, count);
+                    }
+                }
+
+            } catch (IOException e) {
+                destination.delete();
+                throw e;
+            }
+
+            Toast.makeText(
+                    this,
+                    "Изображение добавлено",
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            refreshFiles();
+
+        } catch (Exception e) {
+            error(
+                    "Ошибка импорта: " + message(e)
+            );
+        }
     }
 
     private void goUp() {
@@ -251,8 +620,8 @@ public class ProjectActivity extends Activity
                 return;
             }
 
-            File parent =
-                    currentDirectory.getParentFile();
+            File parent = currentDirectory
+                    .getParentFile();
 
             if (parent != null) {
                 currentDirectory = parent;
@@ -260,190 +629,8 @@ public class ProjectActivity extends Activity
             }
 
         } catch (IOException e) {
-            showError(errorMessage(e));
+            error(message(e));
         }
-    }
-
-    private void openEditor(File file) {
-        try {
-            if (!isInsideProject(file)) {
-                showError("Файл вне проекта");
-                return;
-            }
-
-            String rootPath =
-                    projectDirectory.getCanonicalPath();
-
-            String filePath =
-                    file.getCanonicalPath();
-
-            String relativePath =
-                    filePath.substring(
-                            rootPath.length() + 1
-                    );
-
-            Intent intent = new Intent(
-                    this,
-                    CodeEditorActivity.class
-            );
-
-            intent.putExtra(
-                    "project_name",
-                    projectDirectory.getName()
-            );
-
-            intent.putExtra(
-                    "file_path",
-                    relativePath
-            );
-
-            startActivity(intent);
-
-        } catch (IOException e) {
-            showError(errorMessage(e));
-        }
-    }
-
-    private void showFileActions(File file) {
-        try {
-            if (!isInsideProject(file)) {
-                showError(
-                        "Нельзя изменять файлы вне проекта"
-                );
-                return;
-            }
-
-            if (!file.exists()) {
-                showError("Объект уже удалён");
-                refreshFiles();
-                return;
-            }
-
-            String title = file.isDirectory()
-                    ? "Папка: " + file.getName()
-                    : "Файл: " + file.getName();
-
-            new AlertDialog.Builder(this)
-                    .setTitle(title)
-                    .setItems(
-                            new String[]{"Удалить"},
-                            (dialog, which) -> {
-                                if (which == 0) {
-                                    confirmDelete(file);
-                                }
-                            }
-                    )
-                    .setNegativeButton(
-                            "Отмена", null
-                    )
-                    .show();
-
-        } catch (IOException e) {
-            showError(errorMessage(e));
-        }
-    }
-
-    private void confirmDelete(File file) {
-        String message;
-
-        if (file.isDirectory()) {
-            message =
-                    "Удалить папку «"
-                            + file.getName()
-                            + "» и всё её содержимое?\n\n"
-                            + "Это действие нельзя отменить.";
-        } else {
-            message =
-                    "Удалить файл «"
-                            + file.getName()
-                            + "»?\n\n"
-                            + "Это действие нельзя отменить.";
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("Подтверждение удаления")
-                .setMessage(message)
-                .setNegativeButton(
-                        "Отмена", null
-                )
-                .setPositiveButton(
-                        "Удалить",
-                        (dialog, which) -> {
-                            try {
-                                deleteRecursively(file);
-
-                                Toast.makeText(
-                                        this,
-                                        "Удалено: "
-                                                + file.getName(),
-                                        Toast.LENGTH_SHORT
-                                ).show();
-
-                            } catch (IOException e) {
-                                showError(
-                                        "Ошибка удаления: "
-                                                + errorMessage(e)
-                                );
-                            }
-
-                            refreshFiles();
-                        }
-                )
-                .show();
-    }
-
-    private void deleteRecursively(File file)
-            throws IOException {
-
-        // Корневую папку проекта удалять нельзя.
-        if (!isInsideProject(file)) {
-            throw new IOException(
-                    "Удаление вне проекта запрещено"
-            );
-        }
-
-        // Символические ссылки не обходим:
-        // удаляем только саму ссылку.
-        if (Files.isSymbolicLink(file.toPath())) {
-            Files.delete(file.toPath());
-            return;
-        }
-
-        if (!Files.exists(
-                file.toPath(),
-                LinkOption.NOFOLLOW_LINKS
-        )) {
-            throw new IOException(
-                    "Файл или папка не существует"
-            );
-        }
-
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-
-            if (children == null) {
-                throw new IOException(
-                        "Не удалось прочитать папку: "
-                                + file.getName()
-                );
-            }
-
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-
-        Files.delete(file.toPath());
-    }
-
-    private void showError(String message) {
-        Toast.makeText(
-                this,
-                message == null
-                        ? "Неизвестная ошибка"
-                        : message,
-                Toast.LENGTH_LONG
-        ).show();
     }
 
     @Override
@@ -458,19 +645,24 @@ public class ProjectActivity extends Activity
 
     @Override
     public void onNewFile() {
-        showCreateDialog(false);
+        createDialog(false);
     }
 
     @Override
     public void onNewFolder() {
-        showCreateDialog(true);
+        createDialog(true);
+    }
+
+    @Override
+    public void onGraphics() {
+        showGraphicsMenu();
     }
 
     @Override
     public void onFileSelected(File file) {
         try {
-            if (!isInsideProject(file)) {
-                showError("Объект вне проекта");
+            if (!safeEntry(file)) {
+                error("Объект вне проекта");
                 return;
             }
 
@@ -482,19 +674,17 @@ public class ProjectActivity extends Activity
                 openEditor(file);
 
             } else {
-                showError(
-                        "Объект недоступен"
-                );
+                error("Объект недоступен");
             }
 
         } catch (IOException e) {
-            showError(errorMessage(e));
+            error(message(e));
         }
     }
 
     @Override
     public void onFileLongPressed(File file) {
-        showFileActions(file);
+        showActions(file);
     }
 
     @Override

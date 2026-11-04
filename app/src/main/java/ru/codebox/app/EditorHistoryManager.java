@@ -12,13 +12,44 @@ public final class EditorHistoryManager {
 
     private final EditText editor;
 
-    private final ArrayList<String> history =
+    private final ArrayList<HistoryState> history =
             new ArrayList<>();
 
     private int position = 0;
+
     private boolean restoring = false;
+    private boolean recordingScheduled = false;
+
+    private final Runnable recordTask = new Runnable() {
+        @Override
+        public void run() {
+            recordingScheduled = false;
+
+            if (!restoring) {
+                recordCurrentState();
+            }
+        }
+    };
+
+    private static final class HistoryState {
+
+        final String text;
+        final int cursorStart;
+        final int cursorEnd;
+
+        HistoryState(
+                String text,
+                int cursorStart,
+                int cursorEnd) {
+
+            this.text = text;
+            this.cursorStart = cursorStart;
+            this.cursorEnd = cursorEnd;
+        }
+    }
 
     public EditorHistoryManager(EditText editor) {
+
         if (editor == null) {
             throw new IllegalArgumentException(
                     "Editor cannot be null"
@@ -27,9 +58,7 @@ public final class EditorHistoryManager {
 
         this.editor = editor;
 
-        history.add(
-                editor.getText().toString()
-        );
+        history.add(captureState());
 
         editor.addTextChangedListener(
                 new TextWatcher() {
@@ -55,27 +84,62 @@ public final class EditorHistoryManager {
                     Editable s) {
 
                 if (!restoring) {
-                    record(s.toString());
+                    scheduleRecord();
                 }
             }
         });
     }
 
-    private void record(String text) {
+    private HistoryState captureState() {
 
-        if (history.get(position).equals(text)) {
+        return new HistoryState(
+                editor.getText().toString(),
+                editor.getSelectionStart(),
+                editor.getSelectionEnd()
+        );
+    }
+
+    private void scheduleRecord() {
+
+        if (recordingScheduled) {
+            editor.removeCallbacks(recordTask);
+        }
+
+        recordingScheduled = true;
+
+        editor.post(recordTask);
+    }
+
+    private void flushPendingRecord() {
+
+        if (recordingScheduled) {
+            editor.removeCallbacks(recordTask);
+            recordingScheduled = false;
+            recordCurrentState();
+        }
+    }
+
+    private void recordCurrentState() {
+
+        if (restoring || history.isEmpty()) {
             return;
         }
 
-        // Удаляем ветку Redo после нового ввода.
+        HistoryState current = captureState();
+
+        HistoryState previous = history.get(position);
+
+        if (previous.text.equals(current.text)) {
+            return;
+        }
+
         while (history.size() > position + 1) {
             history.remove(history.size() - 1);
         }
 
-        history.add(text);
+        history.add(current);
         position++;
 
-        // Ограничиваем размер истории.
         while (history.size() > MAX_HISTORY) {
             history.remove(0);
             position--;
@@ -83,46 +147,67 @@ public final class EditorHistoryManager {
     }
 
     public boolean canUndo() {
+        flushPendingRecord();
         return position > 0;
     }
 
     public boolean canRedo() {
+        flushPendingRecord();
         return position < history.size() - 1;
     }
 
     public void undo() {
-        if (!canUndo()) {
+
+        flushPendingRecord();
+
+        if (position <= 0) {
             return;
         }
 
         position--;
+
         restore(history.get(position));
     }
 
     public void redo() {
-        if (!canRedo()) {
+
+        flushPendingRecord();
+
+        if (position >= history.size() - 1) {
             return;
         }
 
         position++;
+
         restore(history.get(position));
     }
 
-    private void restore(String text) {
+    private void restore(HistoryState state) {
+
+        editor.removeCallbacks(recordTask);
+        recordingScheduled = false;
 
         restoring = true;
 
         try {
-            int cursor = editor.getSelectionStart();
+            editor.setText(state.text);
 
-            editor.setText(text);
+            int length = editor.length();
 
-            int safeCursor = Math.max(
+            int start = Math.max(
                     0,
-                    Math.min(cursor, text.length())
+                    Math.min(state.cursorStart, length)
             );
 
-            editor.setSelection(safeCursor);
+            int end = Math.max(
+                    0,
+                    Math.min(state.cursorEnd, length)
+            );
+
+            editor.setSelection(
+                    Math.min(start, end),
+                    Math.max(start, end)
+            );
 
         } finally {
             restoring = false;
@@ -130,11 +215,12 @@ public final class EditorHistoryManager {
     }
 
     public void clear() {
-        history.clear();
 
-        history.add(
-                editor.getText().toString()
-        );
+        editor.removeCallbacks(recordTask);
+        recordingScheduled = false;
+
+        history.clear();
+        history.add(captureState());
 
         position = 0;
     }

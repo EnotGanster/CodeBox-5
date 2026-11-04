@@ -4,8 +4,13 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.os.Bundle;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.text.Layout;
+import android.text.InputType;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -25,28 +30,45 @@ import java.util.Locale;
 
 public class CodeEditorActivity extends Activity {
 
-    private EditText editor;
+    private CodeEditText editor;
     private TextView title;
     private File currentFile;
     private String savedContent = "";
+
+    private boolean insertingIndent = false;
+    private boolean pendingIndent = false;
+    private int indentPosition = -1;
+
+    private final Runnable highlightTask = () -> {
+        if (editor != null && currentFile != null) {
+            CodeSyntaxHighlighter.highlight(
+                    editor, currentFile.getName()
+            );
+        }
+    };
+
+    private int dp(float value) {
+        return (int) (value *
+                getResources().getDisplayMetrics().density
+                + 0.5f);
+    }
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
 
-        String projectName =
-                getIntent().getStringExtra("project_name");
+        String projectName = getIntent()
+                .getStringExtra("project_name");
 
-        String relativePath =
-                getIntent().getStringExtra("file_path");
+        String relativePath = getIntent()
+                .getStringExtra("file_path");
 
         if (projectName == null ||
                 !projectName.matches(
-                        "[a-zA-Z][a-zA-Z0-9_]{0,49}"
+                        "[A-Za-z][A-Za-z0-9_]{0,49}"
                 ) ||
                 relativePath == null ||
                 relativePath.isEmpty()) {
-
             showError("Неверные данные файла");
             return;
         }
@@ -60,69 +82,50 @@ public class CodeEditorActivity extends Activity {
                     projectsRoot, projectName
             ).getCanonicalFile();
 
-            if (!project.getParentFile().equals(projectsRoot)
+            if (!project.getParentFile()
+                    .equals(projectsRoot)
                     || !project.isDirectory()) {
-                throw new IOException(
-                        "Проект не найден"
-                );
+                throw new IOException("Проект не найден");
             }
 
             File file = new File(
                     project, relativePath
             ).getCanonicalFile();
 
-            String projectPath =
-                    project.getCanonicalPath();
-
-            String filePath =
-                    file.getCanonicalPath();
-
-            if (!filePath.startsWith(
-                    projectPath + File.separator
-            )) {
+            if (!file.getPath().startsWith(
+                    project.getPath() + File.separator
+            ) || !file.isFile()) {
                 throw new IOException(
-                        "Файл находится вне проекта"
+                        "Файл недоступен или вне проекта"
                 );
             }
 
-            if (!file.isFile()) {
-                throw new IOException(
-                        "Файл не найден"
-                );
-            }
-
-            // Изображения не должны
-            // открываться как текст.
             if (isImageFile(file)) {
-                Intent imageIntent = new Intent(
+                Intent intent = new Intent(
                         this, ImageViewerActivity.class
                 );
 
-                imageIntent.putExtra(
+                intent.putExtra(
                         "project_name", projectName
                 );
-
-                imageIntent.putExtra(
+                intent.putExtra(
                         "file_path", relativePath
                 );
 
-                startActivity(imageIntent);
+                startActivity(intent);
                 finish();
                 return;
             }
 
             if (file.length() > 1024 * 1024) {
                 throw new IOException(
-                        "Файл слишком большой для редактора"
+                        "Файл больше 1 МБ"
                 );
             }
 
-            // Дополнительная проверка
-            // бинарных файлов.
             if (isBinaryFile(file)) {
                 throw new IOException(
-                        "Бинарный файл нельзя открыть "
-                        + "в текстовом редакторе"
+                        "Бинарный файл нельзя редактировать"
                 );
             }
 
@@ -155,10 +158,6 @@ public class CodeEditorActivity extends Activity {
             byte[] buffer = new byte[4096];
             int count = input.read(buffer);
 
-            if (count <= 0) {
-                return false;
-            }
-
             for (int i = 0; i < count; i++) {
                 if (buffer[i] == 0) {
                     return true;
@@ -172,11 +171,18 @@ public class CodeEditorActivity extends Activity {
     private void buildEditor() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(12, 12, 12, 12);
+        root.setBackgroundColor(0xFFF4F5F8);
 
         title = new TextView(this);
         title.setText(currentFile.getName());
-        title.setTextSize(20);
+        title.setTextSize(18);
+        title.setTypeface(
+                Typeface.DEFAULT, Typeface.BOLD
+        );
+        title.setTextColor(0xFF252535);
+        title.setPadding(
+                dp(16), dp(12), dp(16), dp(8)
+        );
         title.setSingleLine(true);
         root.addView(title);
 
@@ -185,23 +191,36 @@ public class CodeEditorActivity extends Activity {
 
         Button back = new Button(this);
         back.setText("Назад");
-        toolbar.addView(back,
-                new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1
-                ));
 
         Button save = new Button(this);
         save.setText("Сохранить");
-        toolbar.addView(save,
+
+        toolbar.addView(
+                back,
                 new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1
-                ));
+                        0, dp(52), 1
+                )
+        );
+
+        toolbar.addView(
+                save,
+                new LinearLayout.LayoutParams(
+                        0, dp(52), 1
+                )
+        );
 
         root.addView(toolbar);
+
+        TextView info = new TextView(this);
+        info.setText(
+                "CodeBox 5  •  Редактор кода"
+        );
+        info.setTextSize(12);
+        info.setTextColor(0xFF777788);
+        info.setPadding(
+                dp(16), dp(6), dp(8), dp(6)
+        );
+        root.addView(info);
 
         ScrollView vertical = new ScrollView(this);
         vertical.setFillViewport(true);
@@ -210,21 +229,25 @@ public class CodeEditorActivity extends Activity {
                 new HorizontalScrollView(this);
         horizontal.setFillViewport(true);
 
-        editor = new EditText(this);
+        editor = new CodeEditText();
+
         editor.setTextSize(14);
-        editor.setTypeface(
-                android.graphics.Typeface.MONOSPACE
-        );
-        editor.setGravity(Gravity.TOP | Gravity.START);
-        editor.setPadding(16, 16, 16, 16);
-        editor.setBackgroundColor(0xFFF7F7F7);
+        editor.setTypeface(Typeface.MONOSPACE);
         editor.setTextColor(0xFF202020);
+        editor.setGravity(Gravity.TOP | Gravity.START);
+        editor.setBackgroundColor(0xFFFFFFFF);
         editor.setHorizontallyScrolling(true);
         editor.setSingleLine(false);
+
         editor.setInputType(
-                android.text.InputType.TYPE_CLASS_TEXT
-                        | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                        | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        );
+
+        editor.setPadding(
+                dp(58), dp(16),
+                dp(16), dp(16)
         );
 
         editor.setText(savedContent);
@@ -243,8 +266,7 @@ public class CodeEditorActivity extends Activity {
         root.addView(
                 vertical,
                 new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        0, 1
+                        -1, 0, 1
                 )
         );
 
@@ -275,14 +297,112 @@ public class CodeEditorActivity extends Activity {
                     int start,
                     int before,
                     int count) {
-                updateTitle();
+
+                if (!insertingIndent &&
+                        count == 1 &&
+                        start < s.length() &&
+                        s.charAt(start) == '\n') {
+
+                    pendingIndent = true;
+                    indentPosition = start + 1;
+                }
             }
 
             @Override
             public void afterTextChanged(
                     Editable s) {
+
+                if (insertingIndent) {
+                    return;
+                }
+
+                if (pendingIndent) {
+                    pendingIndent = false;
+                    applyAutoIndent(
+                            s, indentPosition
+                    );
+                }
+
+                updateTitle();
+                editor.invalidate();
+
+                editor.removeCallbacks(highlightTask);
+                editor.postDelayed(
+                        highlightTask, 250
+                );
             }
         });
+
+        CodeSyntaxHighlighter.highlight(
+                editor, currentFile.getName()
+        );
+    }
+
+    private void applyAutoIndent(
+            Editable text, int position) {
+
+        if (position <= 0 ||
+                position > text.length()) {
+            return;
+        }
+
+        int previousLineStart =
+                position - 2;
+
+        while (previousLineStart >= 0 &&
+                text.charAt(previousLineStart) != '\n') {
+            previousLineStart--;
+        }
+
+        previousLineStart++;
+
+        StringBuilder indent = new StringBuilder();
+
+        for (int i = previousLineStart;
+                i < position - 1; i++) {
+
+            char c = text.charAt(i);
+
+            if (c == ' ' || c == '\t') {
+                indent.append(c);
+            } else {
+                break;
+            }
+        }
+
+        int last = position - 2;
+
+        while (last >= previousLineStart &&
+                Character.isWhitespace(
+                        text.charAt(last))) {
+            last--;
+        }
+
+        if (last >= previousLineStart &&
+                text.charAt(last) == '{') {
+            indent.append("    ");
+        }
+
+        if (indent.length() == 0) {
+            return;
+        }
+
+        insertingIndent = true;
+
+        try {
+            text.insert(
+                    position, indent.toString()
+            );
+
+            editor.setSelection(
+                    Math.min(
+                            position + indent.length(),
+                            text.length()
+                    )
+            );
+        } finally {
+            insertingIndent = false;
+        }
     }
 
     private boolean hasUnsavedChanges() {
@@ -305,12 +425,10 @@ public class CodeEditorActivity extends Activity {
             return;
         }
 
-        // Не позволяем случайно
-        // перезаписать изображение текстом.
         if (isImageFile(currentFile)) {
             Toast.makeText(
                     this,
-                    "Изображение нельзя сохранить как текст",
+                    "Нельзя сохранять изображение как текст",
                     Toast.LENGTH_LONG
             ).show();
             return;
@@ -399,9 +517,7 @@ public class CodeEditorActivity extends Activity {
                         "Не сохранять",
                         (dialog, which) -> finish()
                 )
-                .setNeutralButton(
-                        "Отмена", null
-                )
+                .setNeutralButton("Отмена", null)
                 .show();
     }
 
@@ -422,7 +538,87 @@ public class CodeEditorActivity extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        if (editor != null) {
+            editor.removeCallbacks(highlightTask);
+        }
+        super.onDestroy();
+    }
+
+    @Override
     public void onBackPressed() {
         attemptExit();
+    }
+
+    // Поле редактирования с номерами строк.
+    private class CodeEditText extends EditText {
+
+        private final Paint linePaint = new Paint(
+                Paint.ANTI_ALIAS_FLAG
+        );
+
+        CodeEditText() {
+            super(CodeEditorActivity.this);
+
+            linePaint.setColor(0xFF9999AA);
+            linePaint.setTextSize(
+                    dp(12)
+            );
+            linePaint.setTypeface(
+                    Typeface.MONOSPACE
+            );
+            linePaint.setTextAlign(
+                    Paint.Align.RIGHT
+            );
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            Layout layout = getLayout();
+
+            if (layout == null) {
+                return;
+            }
+
+            CharSequence content = getText();
+
+            int number = 1;
+            int length = content.length();
+
+            drawNumber(canvas, layout, 0, number);
+
+            for (int i = 0; i < length; i++) {
+                if (content.charAt(i) == '\n') {
+                    number++;
+                    drawNumber(
+                            canvas, layout,
+                            i + 1, number
+                    );
+                }
+            }
+        }
+
+        private void drawNumber(
+                Canvas canvas,
+                Layout layout,
+                int offset,
+                int number) {
+
+            int line = layout.getLineForOffset(
+                    Math.min(offset, getText().length())
+            );
+
+            float y = getTotalPaddingTop()
+                    + layout.getLineBaseline(line);
+
+            canvas.drawText(
+                    String.valueOf(number),
+                    getPaddingLeft() - dp(12),
+                    y,
+                    linePaint
+            );
+        }
     }
 }

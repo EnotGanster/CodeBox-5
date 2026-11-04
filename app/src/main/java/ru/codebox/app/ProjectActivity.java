@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.app.Activity;
@@ -19,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.util.Arrays;
+import java.util.Locale;
 
 public class ProjectActivity extends Activity
         implements ProjectScreen.Listener {
@@ -118,15 +118,12 @@ public class ProjectActivity extends Activity
     private boolean safeEntry(File file)
             throws IOException {
 
-        // Объект должен быть непосредственным
-        // элементом открытой папки.
         if (!file.getAbsoluteFile()
                 .getParentFile()
                 .equals(currentDirectory.getAbsoluteFile())) {
             return false;
         }
 
-        // Не допускаем ссылки за пределы проекта.
         return inside(file);
     }
 
@@ -232,9 +229,21 @@ public class ProjectActivity extends Activity
         dialog.show();
     }
 
-    private void openEditor(File file) {
+    // Определение графических файлов.
+    private boolean isImageFile(File file) {
+        String name = file.getName()
+                .toLowerCase(Locale.ROOT);
+
+        return name.endsWith(".png")
+                || name.endsWith(".jpg")
+                || name.endsWith(".jpeg")
+                || name.endsWith(".webp");
+    }
+
+    // Универсальное открытие файла.
+    private void openFile(File file) {
         try {
-            if (!safeEntry(file)) {
+            if (!safeEntry(file) || !file.isFile()) {
                 error("Недопустимый файл");
                 return;
             }
@@ -246,9 +255,17 @@ public class ProjectActivity extends Activity
                                     .length() + 1
                     );
 
-            Intent intent = new Intent(
-                    this, CodeEditorActivity.class
-            );
+            Intent intent;
+
+            if (isImageFile(file)) {
+                intent = new Intent(
+                        this, ImageViewerActivity.class
+                );
+            } else {
+                intent = new Intent(
+                        this, CodeEditorActivity.class
+                );
+            }
 
             intent.putExtra(
                     "project_name",
@@ -559,7 +576,6 @@ public class ProjectActivity extends Activity
                 );
             }
 
-            // Ограничиваем размер импортируемого файла.
             long maxBytes = 30L * 1024 * 1024;
             long copied = 0;
 
@@ -671,7 +687,7 @@ public class ProjectActivity extends Activity
                 refreshFiles();
 
             } else if (file.isFile()) {
-                openEditor(file);
+                openFile(file);
 
             } else {
                 error("Объект недоступен");

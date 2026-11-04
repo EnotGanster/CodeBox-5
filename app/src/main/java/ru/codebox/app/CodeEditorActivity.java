@@ -276,6 +276,20 @@ public class CodeEditorActivity extends Activity {
                 )
         );
 
+        // Панель быстрых символов CodeBox 5.
+        // Находится под редактором и над
+        // системной клавиатурой при её открытии.
+        EditorToolbar editorToolbar =
+                new EditorToolbar(this, editor);
+
+        root.addView(
+                editorToolbar,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(52)
+                )
+        );
+
         setContentView(root);
 
         back.setOnClickListener(
@@ -329,16 +343,11 @@ public class CodeEditorActivity extends Activity {
                     return;
                 }
 
-                // Автопара работает только при
-                // обычном вводе одного символа.
                 if (editor.getSelectionStart()
                         != start + 1) {
                     return;
                 }
 
-                // Если справа уже стоит такая
-                // закрывающая скобка или кавычка,
-                // перемещаем курсор вместо дублирования.
                 if (isClosingCharacter(typed)
                         && start + 1 < s.length()
                         && s.charAt(start + 1) == typed) {
@@ -436,8 +445,6 @@ public class CodeEditorActivity extends Activity {
             return;
         }
 
-        // Не создаём лишнюю закрывающую
-        // скобку, если она уже находится справа.
         if (position < text.length()
                 && text.charAt(position) == closing) {
             return;
@@ -696,7 +703,6 @@ public class CodeEditorActivity extends Activity {
         attemptExit();
     }
 
-    // Поле редактирования с номерами строк.
     private class CodeEditText extends EditText {
 
         private final Paint linePaint = new Paint(

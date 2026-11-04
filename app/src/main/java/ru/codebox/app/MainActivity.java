@@ -1,10 +1,14 @@
+
 package ru.codebox.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
-import android.widget.Button;
+import android.view.Gravity;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -19,12 +23,19 @@ public class MainActivity extends Activity
         implements HomeScreen.Listener {
 
     private ProjectManager projectManager;
-    private boolean showingProjects = false;
+    private int currentPage = 0;
+
+    private static final int HOME = 0;
+    private static final int PROJECTS = 1;
+    private static final int TREE = 2;
+
+    private int dp(float value) {
+        return CodeBoxTheme.dp(this, value);
+    }
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-
         projectManager = new ProjectManager(this);
         showHome();
     }
@@ -33,17 +44,45 @@ public class MainActivity extends Activity
     protected void onResume() {
         super.onResume();
 
-        if (projectManager != null) {
-            if (showingProjects) {
-                showProjects();
-            } else {
-                showHome();
-            }
+        if (projectManager == null) return;
+
+        if (currentPage == PROJECTS) {
+            showProjects();
+        } else if (currentPage == TREE) {
+            showTreeProjects();
+        } else {
+            showHome();
         }
     }
 
+    private TextView text(
+            String value, int size, boolean bold) {
+
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(
+                CodeBoxTheme.textColor(this)
+        );
+
+        if (bold) {
+            view.setTypeface(
+                    Typeface.DEFAULT,
+                    Typeface.BOLD
+            );
+        }
+
+        return view;
+    }
+
+    private LinearLayout column() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
     private void showHome() {
-        showingProjects = false;
+        currentPage = HOME;
 
         HomeScreen home = new HomeScreen(this, this);
 
@@ -54,42 +93,84 @@ public class MainActivity extends Activity
         );
     }
 
-    private void showProjects() {
-        showingProjects = true;
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(
-                dp(20), dp(24), dp(20), dp(20)
-        );
+    private LinearLayout createPage(String title) {
+        LinearLayout root = column();
         root.setBackgroundColor(
                 CodeBoxTheme.background(this)
         );
 
-        TextView title = new TextView(this);
-        title.setText("Мои проекты");
-        title.setTextSize(28);
-        title.setTextColor(
-                CodeBoxTheme.textColor(this)
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(
+                dp(18), dp(22), dp(18), dp(16)
         );
-        root.addView(title);
 
-        Button back = new Button(this);
-        back.setText("← На главную");
-        root.addView(back);
+        TextView back = text("‹", 38, false);
+        back.setGravity(Gravity.CENTER);
+        back.setBackground(
+                CodeBoxTheme.rounded(
+                        CodeBoxTheme.surface(this),
+                        22, this
+                )
+        );
+
+        header.addView(
+                back,
+                new LinearLayout.LayoutParams(
+                        dp(58), dp(58)
+                )
+        );
+
         back.setOnClickListener(v -> showHome());
 
-        Button create = new Button(this);
-        create.setText("+ Создать проект");
-        root.addView(create);
-        create.setOnClickListener(
-                v -> showCreateProjectDialog()
+        TextView heading = text(title, 24, true);
+        heading.setGravity(Gravity.CENTER);
+        heading.setSingleLine(true);
+        heading.setTextScaleX(0.96f);
+
+        header.addView(
+                heading,
+                new LinearLayout.LayoutParams(
+                        0, dp(58), 1
+                )
         );
 
-        ScrollView scroll = new ScrollView(this);
+        View balance = new View(this);
+        header.addView(
+                balance,
+                new LinearLayout.LayoutParams(
+                        dp(58), dp(58)
+                )
+        );
 
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
+        root.addView(header);
+        return root;
+    }
+
+    private File[] sortedProjects() {
+        File[] projects = projectManager.getProjects();
+
+        Arrays.sort(projects, (a, b) ->
+                a.getName().compareToIgnoreCase(
+                        b.getName()
+                )
+        );
+
+        return projects;
+    }
+
+    private void showProjects() {
+        currentPage = PROJECTS;
+
+        LinearLayout root = createPage("Мои проекты");
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = column();
+
+        list.setPadding(
+                dp(18), dp(12), dp(18), dp(16)
+        );
 
         scroll.addView(list);
 
@@ -100,58 +181,257 @@ public class MainActivity extends Activity
                 )
         );
 
-        File[] projects = projectManager.getProjects();
-
-        Arrays.sort(
-                projects,
-                (a, b) -> a.getName()
-                        .compareToIgnoreCase(b.getName())
-        );
+        File[] projects = sortedProjects();
 
         if (projects.length == 0) {
-            TextView empty = new TextView(this);
-            empty.setText("Пока нет проектов");
-            empty.setTextSize(17);
-            empty.setTextColor(
-                    CodeBoxTheme.secondaryText(this)
+            addEmptyMessage(
+                    list, "Пока нет проектов"
             );
-            empty.setPadding(0, dp(24), 0, 0);
-            list.addView(empty);
         }
 
         for (File project : projects) {
-            TextView card = new TextView(this);
+            addProjectCard(list, project);
+        }
 
-            card.setText("📁  " + project.getName());
-            card.setTextSize(19);
-            card.setTextColor(
-                    CodeBoxTheme.textColor(this)
+        LinearLayout bottom = column();
+        bottom.setPadding(
+                dp(26), dp(12), dp(26), dp(22)
+        );
+
+        TextView create = text(
+                "+ Создать проект", 19, true
+        );
+
+        CodeBoxTheme.styleColoredButton(
+                create, CodeBoxTheme.PURPLE
+        );
+
+        bottom.addView(
+                create,
+                new LinearLayout.LayoutParams(
+                        -1, dp(64)
+                )
+        );
+
+        create.setOnClickListener(
+                v -> showCreateProjectDialog()
+        );
+
+        root.addView(bottom);
+        setContentView(root);
+    }
+
+    private void addProjectCard(
+            LinearLayout list, File project) {
+
+        LinearLayout card = column();
+
+        card.setPadding(
+                dp(20), dp(20), dp(20), dp(18)
+        );
+
+        CodeBoxTheme.styleCard(card);
+
+        TextView name = text(
+                project.getName(), 22, true
+        );
+
+        card.addView(name);
+
+        TextView description = text(
+                "Нет описания", 15, false
+        );
+
+        description.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        LinearLayout.LayoutParams descriptionParams =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        descriptionParams.topMargin = dp(8);
+        card.addView(
+                description, descriptionParams
+        );
+
+        File[] children = project.listFiles();
+        int count = children == null
+                ? 0 : children.length;
+
+        TextView countText = text(
+                "Элементов: " + count,
+                14, false
+        );
+
+        countText.setTextColor(
+                CodeBoxTheme.PURPLE
+        );
+
+        LinearLayout.LayoutParams countParams =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        countParams.topMargin = dp(12);
+        card.addView(countText, countParams);
+
+        LinearLayout.LayoutParams cardParams =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        cardParams.bottomMargin = dp(14);
+
+        list.addView(card, cardParams);
+
+        card.setOnClickListener(
+                v -> openProject(project.getName())
+        );
+    }
+
+    private void showTreeProjects() {
+        currentPage = TREE;
+
+        LinearLayout root =
+                createPage("Дерево проектов");
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout list = column();
+
+        list.setPadding(
+                dp(18), dp(12), dp(18), dp(20)
+        );
+
+        scroll.addView(list);
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(
+                        -1, 0, 1
+                )
+        );
+
+        File[] projects = sortedProjects();
+
+        if (projects.length == 0) {
+            addEmptyMessage(
+                    list, "Пока нет проектов"
             );
-            card.setPadding(
-                    dp(20), dp(22),
-                    dp(20), dp(22)
-            );
+        }
 
-            CodeBoxTheme.styleCard(card);
-
-            LinearLayout.LayoutParams params =
-                    new LinearLayout.LayoutParams(
-                            -1, -2
-                    );
-            params.bottomMargin = dp(12);
-
-            list.addView(card, params);
-
-            card.setOnClickListener(
-                    v -> openProject(project.getName())
-            );
+        for (File project : projects) {
+            addTreeCard(list, project);
         }
 
         setContentView(root);
     }
 
-    private int dp(float value) {
-        return CodeBoxTheme.dp(this, value);
+    private void addTreeCard(
+            LinearLayout list, File project) {
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(
+                dp(16), dp(16), dp(16), dp(16)
+        );
+
+        CodeBoxTheme.styleCard(card);
+
+        // Улучшенный значок дерева:
+        // зелёная крона и мягкая подложка.
+        TextView treeIcon = text("🌳", 34, false);
+        treeIcon.setGravity(Gravity.CENTER);
+
+        treeIcon.setBackground(
+                CodeBoxTheme.rounded(
+                        CodeBoxTheme.isDark(this)
+                                ? 0xFF304436
+                                : 0xFFEAF4E9,
+                        20, this
+                )
+        );
+
+        card.addView(
+                treeIcon,
+                new LinearLayout.LayoutParams(
+                        dp(68), dp(68)
+                )
+        );
+
+        LinearLayout labels = column();
+        labels.setPadding(
+                dp(14), 0, dp(6), 0
+        );
+
+        TextView name = text(
+                project.getName(), 19, true
+        );
+
+        labels.addView(name);
+
+        TextView description = text(
+                "Отдельное дерево этого проекта",
+                13, false
+        );
+
+        description.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        labels.addView(description);
+
+        card.addView(
+                labels,
+                new LinearLayout.LayoutParams(
+                        0, -2, 1
+                )
+        );
+
+        TextView arrow = text("›", 30, false);
+        arrow.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        card.addView(arrow);
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(-1, -2);
+
+        params.bottomMargin = dp(12);
+        list.addView(card, params);
+
+        card.setOnClickListener(
+                v -> showTreePreview(project)
+        );
+    }
+
+    private void showTreePreview(File project) {
+        new AlertDialog.Builder(this)
+                .setTitle(project.getName())
+                .setMessage(
+                        "Просмотр полного дерева файлов "
+                                + "подключим следующим шагом."
+                )
+                .setPositiveButton(
+                        "Открыть проект",
+                        (dialog, which) ->
+                                openProject(
+                                        project.getName()
+                                )
+                )
+                .setNegativeButton(
+                        "Назад", null
+                )
+                .show();
+    }
+
+    private void addEmptyMessage(
+            LinearLayout list, String message) {
+
+        TextView empty = text(message, 16, false);
+        empty.setGravity(Gravity.CENTER);
+        empty.setPadding(
+                dp(12), dp(48), dp(12), dp(48)
+        );
+
+        list.addView(empty);
     }
 
     private void showCreateProjectDialog() {
@@ -159,18 +439,24 @@ public class MainActivity extends Activity
         input.setHint("Например: MyApp");
         input.setSingleLine(true);
 
-        LinearLayout wrapper = new LinearLayout(this);
+        LinearLayout wrapper = column();
         wrapper.setPadding(
                 dp(24), dp(12), dp(24), dp(8)
         );
+
         wrapper.addView(input);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Новый Android-проект")
-                .setView(wrapper)
-                .setPositiveButton("Создать", null)
-                .setNegativeButton("Отмена", null)
-                .create();
+        AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                        .setTitle("Новый Android-проект")
+                        .setView(wrapper)
+                        .setPositiveButton(
+                                "Создать", null
+                        )
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
+                        .create();
 
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(
@@ -183,7 +469,8 @@ public class MainActivity extends Activity
                         "[A-Za-z][A-Za-z0-9_]{0,49}"
                 )) {
                     input.setError(
-                            "Используй латинские буквы, цифры и _"
+                            "Используй латинские буквы, "
+                                    + "цифры и _"
                     );
                     return;
                 }
@@ -202,7 +489,11 @@ public class MainActivity extends Activity
                     openProject(name);
 
                 } catch (IOException e) {
-                    input.setError(e.getMessage());
+                    input.setError(
+                            e.getMessage() == null
+                                    ? "Ошибка создания"
+                                    : e.getMessage()
+                    );
                 }
             });
         });
@@ -231,7 +522,7 @@ public class MainActivity extends Activity
 
     @Override
     public void onOpenProjectTree() {
-        showProjects();
+        showTreeProjects();
     }
 
     @Override
@@ -262,7 +553,7 @@ public class MainActivity extends Activity
 
     @Override
     public void onBackPressed() {
-        if (showingProjects) {
+        if (currentPage != HOME) {
             showHome();
         } else {
             super.onBackPressed();

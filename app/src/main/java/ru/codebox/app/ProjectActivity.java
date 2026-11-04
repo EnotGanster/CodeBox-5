@@ -7,6 +7,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.database.Cursor;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -24,6 +26,7 @@ public class ProjectActivity extends Activity
         implements ProjectScreen.Listener {
 
     private static final int PICK_IMAGE = 501;
+    private static final int MENU_LIBRARY = 601;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -84,6 +87,61 @@ public class ProjectActivity extends Activity
         );
 
         refreshFiles();
+    }
+
+    // Меню библиотеки кода.
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        super.onCreateOptionsMenu(menu);
+
+        menu.add(
+                Menu.NONE,
+                MENU_LIBRARY,
+                Menu.NONE,
+                "📚 Библиотека кода"
+        ).setShowAsAction(
+                MenuItem.SHOW_AS_ACTION_NEVER
+        );
+
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+
+        if (item.getItemId() == MENU_LIBRARY) {
+            openCodeLibrary();
+            return true;
+        }
+
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void openCodeLibrary() {
+
+        if (projectDirectory == null) {
+            error("Проект не выбран");
+            return;
+        }
+
+        Intent intent = new Intent(
+                this,
+                CodeLibraryActivity.class
+        );
+
+        intent.putExtra(
+                "project_name",
+                projectDirectory.getName()
+        );
+
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            error(
+                    "Не удалось открыть библиотеку: "
+                            + message(e)
+            );
+        }
     }
 
     private int dp(float value) {
@@ -229,7 +287,6 @@ public class ProjectActivity extends Activity
         dialog.show();
     }
 
-    // Определение графических файлов.
     private boolean isImageFile(File file) {
         String name = file.getName()
                 .toLowerCase(Locale.ROOT);
@@ -240,7 +297,6 @@ public class ProjectActivity extends Activity
                 || name.endsWith(".webp");
     }
 
-    // Универсальное открытие файла.
     private void openFile(File file) {
         try {
             if (!safeEntry(file) || !file.isFile()) {

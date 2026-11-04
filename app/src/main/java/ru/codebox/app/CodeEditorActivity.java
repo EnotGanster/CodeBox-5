@@ -35,6 +35,10 @@ public class CodeEditorActivity extends Activity {
     private File currentFile;
     private String savedContent = "";
 
+    private EditorHistoryManager historyManager;
+    private Button undoButton;
+    private Button redoButton;
+
     private boolean internalEdit = false;
     private boolean pendingIndent = false;
     private int indentPosition = -1;
@@ -198,11 +202,39 @@ public class CodeEditorActivity extends Activity {
         Button back = new Button(this);
         back.setText("Назад");
 
+        undoButton = new Button(this);
+        undoButton.setText("↶");
+        undoButton.setTextSize(22);
+        undoButton.setContentDescription(
+                "Отменить изменение"
+        );
+
+        redoButton = new Button(this);
+        redoButton.setText("↷");
+        redoButton.setTextSize(22);
+        redoButton.setContentDescription(
+                "Повторить изменение"
+        );
+
         Button save = new Button(this);
         save.setText("Сохранить");
 
         toolbar.addView(
                 back,
+                new LinearLayout.LayoutParams(
+                        0, dp(52), 2
+                )
+        );
+
+        toolbar.addView(
+                undoButton,
+                new LinearLayout.LayoutParams(
+                        0, dp(52), 1
+                )
+        );
+
+        toolbar.addView(
+                redoButton,
                 new LinearLayout.LayoutParams(
                         0, dp(52), 1
                 )
@@ -211,7 +243,7 @@ public class CodeEditorActivity extends Activity {
         toolbar.addView(
                 save,
                 new LinearLayout.LayoutParams(
-                        0, dp(52), 1
+                        0, dp(52), 2
                 )
         );
 
@@ -276,9 +308,6 @@ public class CodeEditorActivity extends Activity {
                 )
         );
 
-        // Панель быстрых символов CodeBox 5.
-        // Находится под редактором и над
-        // системной клавиатурой при её открытии.
         EditorToolbar editorToolbar =
                 new EditorToolbar(this, editor);
 
@@ -292,6 +321,11 @@ public class CodeEditorActivity extends Activity {
 
         setContentView(root);
 
+        // Историю создаём после загрузки файла.
+        historyManager = new EditorHistoryManager(
+                editor
+        );
+
         back.setOnClickListener(
                 v -> attemptExit()
         );
@@ -299,6 +333,24 @@ public class CodeEditorActivity extends Activity {
         save.setOnClickListener(
                 v -> saveFile()
         );
+
+        undoButton.setOnClickListener(v -> {
+            if (historyManager != null) {
+                historyManager.undo();
+                updateTitle();
+                scheduleHighlight();
+                updateHistoryButtons();
+            }
+        });
+
+        redoButton.setOnClickListener(v -> {
+            if (historyManager != null) {
+                historyManager.redo();
+                updateTitle();
+                scheduleHighlight();
+                updateHistoryButtons();
+            }
+        });
 
         editor.addTextChangedListener(
                 new TextWatcher() {
@@ -395,10 +447,12 @@ public class CodeEditorActivity extends Activity {
 
                 updateTitle();
                 editor.invalidate();
+                scheduleHighlight();
 
-                editor.removeCallbacks(highlightTask);
-                editor.postDelayed(
-                        highlightTask, 250
+                // Обновляем состояние кнопок
+                // после завершения текущего ввода.
+                editor.post(
+                        () -> updateHistoryButtons()
                 );
             }
         });
@@ -406,6 +460,37 @@ public class CodeEditorActivity extends Activity {
         CodeSyntaxHighlighter.highlight(
                 editor, currentFile.getName()
         );
+
+        updateHistoryButtons();
+    }
+
+    private void scheduleHighlight() {
+        if (editor == null) {
+            return;
+        }
+
+        editor.removeCallbacks(highlightTask);
+        editor.postDelayed(
+                highlightTask, 250
+        );
+    }
+
+    private void updateHistoryButtons() {
+        if (historyManager == null) {
+            return;
+        }
+
+        if (undoButton != null) {
+            undoButton.setEnabled(
+                    historyManager.canUndo()
+            );
+        }
+
+        if (redoButton != null) {
+            redoButton.setEnabled(
+                    historyManager.canRedo()
+            );
+        }
     }
 
     private char matchingClose(char c) {

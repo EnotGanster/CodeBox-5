@@ -1,3 +1,4 @@
+
 package ru.codebox.app;
 
 import android.content.Context;
@@ -8,6 +9,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +17,8 @@ import java.nio.file.StandardCopyOption;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
 public final class CodeLibraryManager {
 
@@ -56,8 +60,11 @@ public final class CodeLibraryManager {
                     )
             );
 
-            if (!data.has("snippets")
-                    || !data.has("dependencies")) {
+            if (!(data.opt("snippets")
+                    instanceof JSONArray)
+                    || !(data.opt("dependencies")
+                    instanceof JSONObject)) {
+
                 throw new IOException(
                         "Неверный формат библиотеки"
                 );
@@ -78,10 +85,12 @@ public final class CodeLibraryManager {
             JSONObject root = new JSONObject();
 
             root.put("version", 1);
+
             root.put(
                     "snippets",
                     new JSONArray()
             );
+
             root.put(
                     "dependencies",
                     new JSONObject()
@@ -90,7 +99,10 @@ public final class CodeLibraryManager {
             return root;
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка создания библиотеки",
+                    e
+            );
         }
     }
 
@@ -105,9 +117,13 @@ public final class CodeLibraryManager {
         );
 
         try {
+            // Используем toString() без аргументов.
+            // Это исправляет ошибку JSONException
+            // при компиляции Android Java.
+
             Files.write(
                     temp,
-                    data.toString(2).getBytes(
+                    data.toString().getBytes(
                             StandardCharsets.UTF_8
                     )
             );
@@ -123,6 +139,7 @@ public final class CodeLibraryManager {
             } catch (
                     java.nio.file.AtomicMoveNotSupportedException e
             ) {
+
                 Files.move(
                         temp,
                         target,
@@ -167,6 +184,7 @@ public final class CodeLibraryManager {
 
         if (title == null
                 || title.trim().isEmpty()) {
+
             throw new IOException(
                     "Название шаблона пустое"
             );
@@ -174,6 +192,7 @@ public final class CodeLibraryManager {
 
         if (code == null
                 || code.isEmpty()) {
+
             throw new IOException(
                     "Код шаблона пустой"
             );
@@ -182,11 +201,12 @@ public final class CodeLibraryManager {
         String lang = language == null
                 ? "java"
                 : language.trim().toLowerCase(
-                        java.util.Locale.ROOT
+                        Locale.ROOT
                 );
 
         if (!lang.equals("java")
                 && !lang.equals("xml")) {
+
             throw new IOException(
                     "Поддерживаются Java и XML"
             );
@@ -198,6 +218,7 @@ public final class CodeLibraryManager {
 
         if (!project.isEmpty()
                 && !isValidProject(project)) {
+
             throw new IOException(
                     "Неверное название проекта"
             );
@@ -211,21 +232,38 @@ public final class CodeLibraryManager {
 
             item.put(
                     "id",
-                    java.util.UUID.randomUUID()
-                            .toString()
+                    UUID.randomUUID().toString()
             );
 
-            item.put("title", title.trim());
-            item.put("language", lang);
-            item.put("code", code);
-            item.put("project", project);
+            item.put(
+                    "title",
+                    title.trim()
+            );
+
+            item.put(
+                    "language",
+                    lang
+            );
+
+            item.put(
+                    "code",
+                    code
+            );
+
+            item.put(
+                    "project",
+                    project
+            );
 
             snippets.put(item);
 
             save();
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка добавления шаблона",
+                    e
+            );
         }
     }
 
@@ -252,7 +290,9 @@ public final class CodeLibraryManager {
                         snippets.getJSONObject(i);
 
                 String owner =
-                        item.optString("project", "");
+                        item.optString(
+                                "project", ""
+                        );
 
                 if (!owner.isEmpty()
                         && !owner.equals(project)) {
@@ -273,7 +313,10 @@ public final class CodeLibraryManager {
             return result;
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка чтения шаблонов",
+                    e
+            );
         }
     }
 
@@ -299,6 +342,7 @@ public final class CodeLibraryManager {
 
                 if (item.optString("id")
                         .equals(id)) {
+
                     removed = true;
                     continue;
                 }
@@ -307,14 +351,21 @@ public final class CodeLibraryManager {
             }
 
             if (removed) {
-                data.put("snippets", updated);
+                data.put(
+                        "snippets",
+                        updated
+                );
+
                 save();
             }
 
             return removed;
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка удаления шаблона",
+                    e
+            );
         }
     }
 
@@ -333,6 +384,7 @@ public final class CodeLibraryManager {
             throws IOException {
 
         if (!isValidProject(projectName)) {
+
             throw new IOException(
                     "Неверное название проекта"
             );
@@ -344,6 +396,7 @@ public final class CodeLibraryManager {
                         + "[A-Za-z0-9_.-]+:"
                         + "[A-Za-z0-9_.+\\-]+"
                 )) {
+
             throw new IOException(
                     "Ожидается group:artifact:version"
             );
@@ -361,9 +414,12 @@ public final class CodeLibraryManager {
                     );
 
             if (list == null) {
+
                 list = new JSONArray();
+
                 dependencies.put(
-                        projectName, list
+                        projectName,
+                        list
                 );
             }
 
@@ -378,10 +434,14 @@ public final class CodeLibraryManager {
             }
 
             list.put(dependency);
+
             save();
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка добавления зависимости",
+                    e
+            );
         }
     }
 
@@ -393,6 +453,7 @@ public final class CodeLibraryManager {
                 new ArrayList<>();
 
         if (!isValidProject(projectName)) {
+
             throw new IOException(
                     "Неверное название проекта"
             );
@@ -425,7 +486,10 @@ public final class CodeLibraryManager {
             return result;
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка чтения зависимостей",
+                    e
+            );
         }
     }
 
@@ -435,6 +499,7 @@ public final class CodeLibraryManager {
             throws IOException {
 
         if (!isValidProject(projectName)) {
+
             throw new IOException(
                     "Неверное название проекта"
             );
@@ -475,16 +540,22 @@ public final class CodeLibraryManager {
             }
 
             if (removed) {
+
                 dependencies.put(
-                        projectName, updated
+                        projectName,
+                        updated
                 );
+
                 save();
             }
 
             return removed;
 
         } catch (JSONException e) {
-            throw new IOException(e);
+            throw new IOException(
+                    "Ошибка удаления зависимости",
+                    e
+            );
         }
     }
 }

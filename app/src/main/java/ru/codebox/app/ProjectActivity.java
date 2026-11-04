@@ -1,28 +1,25 @@
+
 package ru.codebox.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.os.Bundle;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 
-public class ProjectActivity extends Activity {
+public class ProjectActivity extends Activity
+        implements ProjectScreen.Listener {
 
     private File projectDirectory;
     private File currentDirectory;
     private ProjectFileManager fileManager;
-
-    private LinearLayout fileContainer;
-    private TextView pathText;
+    private ProjectScreen projectScreen;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -49,6 +46,7 @@ public class ProjectActivity extends Activity {
             fileManager = new ProjectFileManager(
                     projectDirectory
             );
+
             currentDirectory =
                     projectDirectory.getCanonicalFile();
 
@@ -62,70 +60,18 @@ public class ProjectActivity extends Activity {
     }
 
     private void buildScreen() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(16, 20, 16, 16);
+        projectScreen = new ProjectScreen(this, this);
 
-        TextView title = new TextView(this);
-        title.setText(
-                "Проект: " + projectDirectory.getName()
-        );
-        title.setTextSize(22);
-        root.addView(title);
-
-        pathText = new TextView(this);
-        pathText.setTextSize(13);
-        pathText.setPadding(0, 12, 0, 12);
-        root.addView(pathText);
-
-        Button newFile = new Button(this);
-        newFile.setText("+ Новый файл");
-        root.addView(newFile);
-
-        Button newFolder = new Button(this);
-        newFolder.setText("+ Новая папка");
-        root.addView(newFolder);
-
-        Button up = new Button(this);
-        up.setText("⬆ На уровень выше");
-        root.addView(up);
-
-        ScrollView scroll = new ScrollView(this);
-
-        fileContainer = new LinearLayout(this);
-        fileContainer.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        scroll.addView(fileContainer);
-
-        root.addView(
-                scroll,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        0,
-                        1
+        setContentView(
+                projectScreen.create(
+                        projectDirectory.getName()
                 )
         );
-
-        setContentView(root);
-
-        newFile.setOnClickListener(
-                v -> showCreateDialog(false)
-        );
-
-        newFolder.setOnClickListener(
-                v -> showCreateDialog(true)
-        );
-
-        up.setOnClickListener(v -> goUp());
 
         refreshFiles();
     }
 
     private void refreshFiles() {
-        fileContainer.removeAllViews();
-
         try {
             String rootPath =
                     projectDirectory.getCanonicalPath();
@@ -137,7 +83,9 @@ public class ProjectActivity extends Activity {
                     && !currentPath.startsWith(
                             rootPath + File.separator
                     )) {
-                currentDirectory = projectDirectory;
+                currentDirectory =
+                        projectDirectory.getCanonicalFile();
+
                 currentPath = rootPath;
             }
 
@@ -145,53 +93,30 @@ public class ProjectActivity extends Activity {
                     ? "/"
                     : currentPath.substring(rootPath.length());
 
-            pathText.setText("Папка: " + relative);
+            File[] files = currentDirectory.listFiles();
+
+            if (files == null) {
+                showError("Не удалось прочитать папку");
+                return;
+            }
+
+            Arrays.sort(files, (a, b) -> {
+                if (a.isDirectory() != b.isDirectory()) {
+                    return a.isDirectory() ? -1 : 1;
+                }
+
+                return a.getName()
+                        .compareToIgnoreCase(b.getName());
+            });
+
+            projectScreen.updatePath(
+                    relative, files.length
+            );
+
+            projectScreen.showFiles(files);
 
         } catch (IOException e) {
             showError(e.getMessage());
-            return;
-        }
-
-        File[] files = currentDirectory.listFiles();
-
-        if (files == null) {
-            showError("Не удалось прочитать папку");
-            return;
-        }
-
-        Arrays.sort(files, (a, b) -> {
-            if (a.isDirectory() != b.isDirectory()) {
-                return a.isDirectory() ? -1 : 1;
-            }
-            return a.getName()
-                    .compareToIgnoreCase(b.getName());
-        });
-
-        if (files.length == 0) {
-            TextView empty = new TextView(this);
-            empty.setText("Папка пуста");
-            fileContainer.addView(empty);
-        }
-
-        for (File file : files) {
-            Button button = new Button(this);
-
-            button.setText(
-                    (file.isDirectory() ? "📁 " : "📄 ")
-                            + file.getName()
-            );
-            button.setAllCaps(false);
-
-            fileContainer.addView(button);
-
-            button.setOnClickListener(v -> {
-                if (file.isDirectory()) {
-                    currentDirectory = file;
-                    refreshFiles();
-                } else {
-                    openEditor(file);
-                }
-            });
         }
     }
 
@@ -204,17 +129,23 @@ public class ProjectActivity extends Activity {
         );
 
         LinearLayout wrapper = new LinearLayout(this);
-        wrapper.setPadding(32, 12, 32, 8);
+        wrapper.setPadding(
+                dp(24), dp(12), dp(24), dp(8)
+        );
+
         wrapper.addView(input);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(
-                        folder ? "Новая папка" : "Новый файл"
-                )
-                .setView(wrapper)
-                .setPositiveButton("Создать", null)
-                .setNegativeButton("Отмена", null)
-                .create();
+        AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                        .setTitle(
+                                folder
+                                        ? "Новая папка"
+                                        : "Новый файл"
+                        )
+                        .setView(wrapper)
+                        .setPositiveButton("Создать", null)
+                        .setNegativeButton("Отмена", null)
+                        .create();
 
         dialog.setOnShowListener(ignored -> {
             dialog.getButton(
@@ -239,7 +170,8 @@ public class ProjectActivity extends Activity {
 
                     Toast.makeText(
                             this,
-                            folder ? "Папка создана"
+                            folder
+                                    ? "Папка создана"
                                     : "Файл создан",
                             Toast.LENGTH_SHORT
                     ).show();
@@ -253,10 +185,16 @@ public class ProjectActivity extends Activity {
         dialog.show();
     }
 
+    private int dp(float value) {
+        return CodeBoxTheme.dp(this, value);
+    }
+
     private void goUp() {
         try {
             if (currentDirectory.getCanonicalFile()
-                    .equals(projectDirectory.getCanonicalFile())) {
+                    .equals(
+                            projectDirectory.getCanonicalFile()
+                    )) {
                 finish();
                 return;
             }
@@ -278,7 +216,8 @@ public class ProjectActivity extends Activity {
             String rootPath =
                     projectDirectory.getCanonicalPath();
 
-            String filePath = file.getCanonicalPath();
+            String filePath =
+                    file.getCanonicalPath();
 
             if (!filePath.startsWith(
                     rootPath + File.separator
@@ -288,7 +227,9 @@ public class ProjectActivity extends Activity {
             }
 
             String relativePath =
-                    filePath.substring(rootPath.length() + 1);
+                    filePath.substring(
+                            rootPath.length() + 1
+                    );
 
             Intent intent = new Intent(
                     this, CodeEditorActivity.class
@@ -313,12 +254,73 @@ public class ProjectActivity extends Activity {
 
     private void showError(String message) {
         Toast.makeText(
-                this, message, Toast.LENGTH_LONG
+                this,
+                message,
+                Toast.LENGTH_LONG
         ).show();
+    }
+
+    @Override
+    public void onBack() {
+        finish();
+    }
+
+    @Override
+    public void onUp() {
+        goUp();
+    }
+
+    @Override
+    public void onNewFile() {
+        showCreateDialog(false);
+    }
+
+    @Override
+    public void onNewFolder() {
+        showCreateDialog(true);
+    }
+
+    @Override
+    public void onFileSelected(File file) {
+        try {
+            String rootPath =
+                    projectDirectory.getCanonicalPath();
+
+            String filePath =
+                    file.getCanonicalPath();
+
+            if (!filePath.startsWith(
+                    rootPath + File.separator
+            )) {
+                showError("Объект вне проекта");
+                return;
+            }
+
+            if (file.isDirectory()) {
+                currentDirectory = file;
+                refreshFiles();
+            } else if (file.isFile()) {
+                openEditor(file);
+            } else {
+                showError("Объект недоступен");
+            }
+
+        } catch (IOException e) {
+            showError(e.getMessage());
+        }
     }
 
     @Override
     public void onBackPressed() {
         goUp();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (projectScreen != null) {
+            refreshFiles();
+        }
     }
 }

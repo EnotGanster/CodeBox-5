@@ -2,6 +2,7 @@ package ru.codebox.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -20,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 
 public class CodeEditorActivity extends Activity {
 
@@ -52,16 +54,28 @@ public class CodeEditorActivity extends Activity {
         try {
             File projectsRoot = new File(
                     getFilesDir(), "projects"
-            );
+            ).getCanonicalFile();
 
             File project = new File(
                     projectsRoot, projectName
-            );
+            ).getCanonicalFile();
 
-            File file = new File(project, relativePath);
+            if (!project.getParentFile().equals(projectsRoot)
+                    || !project.isDirectory()) {
+                throw new IOException(
+                        "Проект не найден"
+                );
+            }
 
-            String projectPath = project.getCanonicalPath();
-            String filePath = file.getCanonicalPath();
+            File file = new File(
+                    project, relativePath
+            ).getCanonicalFile();
+
+            String projectPath =
+                    project.getCanonicalPath();
+
+            String filePath =
+                    file.getCanonicalPath();
 
             if (!filePath.startsWith(
                     projectPath + File.separator
@@ -77,9 +91,38 @@ public class CodeEditorActivity extends Activity {
                 );
             }
 
+            // Изображения не должны
+            // открываться как текст.
+            if (isImageFile(file)) {
+                Intent imageIntent = new Intent(
+                        this, ImageViewerActivity.class
+                );
+
+                imageIntent.putExtra(
+                        "project_name", projectName
+                );
+
+                imageIntent.putExtra(
+                        "file_path", relativePath
+                );
+
+                startActivity(imageIntent);
+                finish();
+                return;
+            }
+
             if (file.length() > 1024 * 1024) {
                 throw new IOException(
                         "Файл слишком большой для редактора"
+                );
+            }
+
+            // Дополнительная проверка
+            // бинарных файлов.
+            if (isBinaryFile(file)) {
+                throw new IOException(
+                        "Бинарный файл нельзя открыть "
+                        + "в текстовом редакторе"
                 );
             }
 
@@ -91,6 +134,39 @@ public class CodeEditorActivity extends Activity {
         } catch (IOException e) {
             showError(e.getMessage());
         }
+    }
+
+    private boolean isImageFile(File file) {
+        String name = file.getName()
+                .toLowerCase(Locale.ROOT);
+
+        return name.endsWith(".png")
+                || name.endsWith(".jpg")
+                || name.endsWith(".jpeg")
+                || name.endsWith(".webp");
+    }
+
+    private boolean isBinaryFile(File file)
+            throws IOException {
+
+        try (java.io.InputStream input =
+                     Files.newInputStream(file.toPath())) {
+
+            byte[] buffer = new byte[4096];
+            int count = input.read(buffer);
+
+            if (count <= 0) {
+                return false;
+            }
+
+            for (int i = 0; i < count; i++) {
+                if (buffer[i] == 0) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void buildEditor() {
@@ -109,15 +185,21 @@ public class CodeEditorActivity extends Activity {
 
         Button back = new Button(this);
         back.setText("Назад");
-        toolbar.addView(back, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1
-        ));
+        toolbar.addView(back,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1
+                ));
 
         Button save = new Button(this);
         save.setText("Сохранить");
-        toolbar.addView(save, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1
-        ));
+        toolbar.addView(save,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1
+                ));
 
         root.addView(toolbar);
 
@@ -148,41 +230,57 @@ public class CodeEditorActivity extends Activity {
         editor.setText(savedContent);
         editor.setSelection(0);
 
-        horizontal.addView(editor,
+        horizontal.addView(
+                editor,
                 new HorizontalScrollView.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.MATCH_PARENT
-                ));
+                )
+        );
 
         vertical.addView(horizontal);
 
-        root.addView(vertical,
+        root.addView(
+                vertical,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         0, 1
-                ));
+                )
+        );
 
         setContentView(root);
 
-        back.setOnClickListener(v -> attemptExit());
-        save.setOnClickListener(v -> saveFile());
+        back.setOnClickListener(
+                v -> attemptExit()
+        );
 
-        editor.addTextChangedListener(new TextWatcher() {
+        save.setOnClickListener(
+                v -> saveFile()
+        );
+
+        editor.addTextChangedListener(
+                new TextWatcher() {
+
             @Override
             public void beforeTextChanged(
-                    CharSequence s, int start,
-                    int count, int after) {
+                    CharSequence s,
+                    int start,
+                    int count,
+                    int after) {
             }
 
             @Override
             public void onTextChanged(
-                    CharSequence s, int start,
-                    int before, int count) {
+                    CharSequence s,
+                    int start,
+                    int before,
+                    int count) {
                 updateTitle();
             }
 
             @Override
-            public void afterTextChanged(Editable s) {
+            public void afterTextChanged(
+                    Editable s) {
             }
         });
     }
@@ -194,20 +292,43 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void updateTitle() {
-        if (title != null) {
+        if (title != null && currentFile != null) {
             title.setText(
                     currentFile.getName() +
-                            (hasUnsavedChanges() ? " *" : "")
+                    (hasUnsavedChanges() ? " *" : "")
             );
         }
     }
 
     private void saveFile() {
-        String content = editor.getText().toString();
+        if (editor == null || currentFile == null) {
+            return;
+        }
+
+        // Не позволяем случайно
+        // перезаписать изображение текстом.
+        if (isImageFile(currentFile)) {
+            Toast.makeText(
+                    this,
+                    "Изображение нельзя сохранить как текст",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+
+        String content =
+                editor.getText().toString();
+
         Path target = currentFile.toPath();
         Path temp = null;
 
         try {
+            if (isBinaryFile(currentFile)) {
+                throw new IOException(
+                        "Сохранение бинарного файла запрещено"
+                );
+            }
+
             temp = Files.createTempFile(
                     target.getParent(),
                     ".codebox-", ".tmp"
@@ -215,7 +336,9 @@ public class CodeEditorActivity extends Activity {
 
             Files.write(
                     temp,
-                    content.getBytes(StandardCharsets.UTF_8)
+                    content.getBytes(
+                            StandardCharsets.UTF_8
+                    )
             );
 
             Files.move(
@@ -228,14 +351,18 @@ public class CodeEditorActivity extends Activity {
             savedContent = content;
             updateTitle();
 
-            Toast.makeText(this,
+            Toast.makeText(
+                    this,
                     "Файл сохранён",
-                    Toast.LENGTH_SHORT).show();
+                    Toast.LENGTH_SHORT
+            ).show();
 
         } catch (IOException e) {
-            Toast.makeText(this,
+            Toast.makeText(
+                    this,
                     "Ошибка сохранения: " + e.getMessage(),
-                    Toast.LENGTH_LONG).show();
+                    Toast.LENGTH_LONG
+            ).show();
 
         } finally {
             if (temp != null) {
@@ -259,8 +386,10 @@ public class CodeEditorActivity extends Activity {
                         "Сохранить изменения перед выходом?"
                 )
                 .setPositiveButton(
-                        "Сохранить", (dialog, which) -> {
+                        "Сохранить",
+                        (dialog, which) -> {
                             saveFile();
+
                             if (!hasUnsavedChanges()) {
                                 finish();
                             }
@@ -270,14 +399,20 @@ public class CodeEditorActivity extends Activity {
                         "Не сохранять",
                         (dialog, which) -> finish()
                 )
-                .setNeutralButton("Отмена", null)
+                .setNeutralButton(
+                        "Отмена", null
+                )
                 .show();
     }
 
     private void showError(String message) {
         new AlertDialog.Builder(this)
                 .setTitle("Ошибка редактора")
-                .setMessage(message)
+                .setMessage(
+                        message == null
+                                ? "Неизвестная ошибка"
+                                : message
+                )
                 .setPositiveButton(
                         "Закрыть",
                         (dialog, which) -> finish()

@@ -1,6 +1,7 @@
 package ru.codebox.app;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
@@ -8,6 +9,7 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 
@@ -29,6 +31,7 @@ public final class ProjectScreen {
     private LinearLayout fileContainer;
     private TextView pathText;
     private TextView countText;
+    private String currentProjectName;
 
     public ProjectScreen(
             Activity activity,
@@ -66,6 +69,8 @@ public final class ProjectScreen {
     }
 
     public View create(String projectName) {
+
+        currentProjectName = projectName;
 
         LinearLayout root =
                 new LinearLayout(activity);
@@ -215,7 +220,75 @@ public final class ProjectScreen {
 
         panel.addView(countText);
 
+        // Постоянная кнопка библиотеки.
+        TextView libraryButton = text(
+                "📚 Библиотека кода",
+                15,
+                true
+        );
+
+        CodeBoxTheme.styleColoredButton(
+                libraryButton,
+                CodeBoxTheme.PURPLE
+        );
+
+        libraryButton.setGravity(
+                Gravity.CENTER
+        );
+
+        LinearLayout.LayoutParams libraryParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                );
+
+        libraryParams.topMargin = dp(12);
+
+        panel.addView(
+                libraryButton,
+                libraryParams
+        );
+
+        libraryButton.setOnClickListener(
+                v -> openCodeLibrary()
+        );
+
         root.addView(panel);
+    }
+
+    private void openCodeLibrary() {
+
+        if (currentProjectName == null
+                || currentProjectName.isEmpty()) {
+
+            Toast.makeText(
+                    activity,
+                    "Проект не выбран",
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            return;
+        }
+
+        Intent intent = new Intent(
+                activity,
+                CodeLibraryActivity.class
+        );
+
+        intent.putExtra(
+                "project_name",
+                currentProjectName
+        );
+
+        try {
+            activity.startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(
+                    activity,
+                    "Ошибка открытия библиотеки: "
+                            + e.getMessage(),
+                    Toast.LENGTH_LONG
+            ).show();
+        }
     }
 
     private void createFileArea(
@@ -482,20 +555,16 @@ public final class ProjectScreen {
                         -1, -2
                 );
 
-        params.bottomMargin =
-                dp(10);
+        params.bottomMargin = dp(10);
 
         fileContainer.addView(
                 card, params
         );
 
-        // Обычное нажатие.
         card.setOnClickListener(
                 v -> listener.onFileSelected(file)
         );
 
-        // Долгое нажатие:
-        // меню действий с файлом.
         card.setOnLongClickListener(v -> {
             listener.onFileLongPressed(file);
             return true;

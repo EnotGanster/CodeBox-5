@@ -10,6 +10,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
+
 public final class ProjectScreen {
 
     public interface Listener {
@@ -17,7 +19,10 @@ public final class ProjectScreen {
         void onUp();
         void onNewFile();
         void onNewFolder();
-        void onFileSelected(java.io.File file);
+        void onFileSelected(File file);
+
+        // Новое действие: долгое нажатие
+        void onFileLongPressed(File file);
     }
 
     private final Activity activity;
@@ -50,7 +55,8 @@ public final class ProjectScreen {
 
         if (bold) {
             view.setTypeface(
-                    Typeface.DEFAULT, Typeface.BOLD
+                    Typeface.DEFAULT,
+                    Typeface.BOLD
             );
         }
 
@@ -98,34 +104,47 @@ public final class ProjectScreen {
         back.setTextColor(0xFFFFFFFF);
         back.setGravity(Gravity.CENTER);
 
-        header.addView(back,
+        header.addView(
+                back,
                 new LinearLayout.LayoutParams(
                         dp(48), dp(48)
-                ));
+                )
+        );
 
-        back.setOnClickListener(v -> listener.onBack());
+        back.setOnClickListener(
+                v -> listener.onBack()
+        );
 
         LinearLayout labels = new LinearLayout(activity);
         labels.setOrientation(LinearLayout.VERTICAL);
 
-        TextView title = text(projectName, 22, true);
+        TextView title = text(
+                projectName, 22, true
+        );
+
         title.setTextColor(0xFFFFFFFF);
         title.setSingleLine(true);
         title.setEllipsize(
                 android.text.TextUtils.TruncateAt.END
         );
+
         labels.addView(title);
 
         TextView subtitle = text(
-                "Управление проектом", 13, false
+                "Управление проектом",
+                13,
+                false
         );
+
         subtitle.setTextColor(0xFFECE3FF);
         labels.addView(subtitle);
 
-        header.addView(labels,
+        header.addView(
+                labels,
                 new LinearLayout.LayoutParams(
                         0, -2, 1
-                ));
+                )
+        );
 
         root.addView(header);
     }
@@ -139,15 +158,23 @@ public final class ProjectScreen {
         );
 
         pathText = text("/", 14, true);
-        pathText.setTextColor(CodeBoxTheme.PURPLE);
+        pathText.setTextColor(
+                CodeBoxTheme.PURPLE
+        );
+
         panel.addView(pathText);
 
-        countText = text("0 элементов", 12, false);
+        countText = text(
+                "0 элементов",
+                12,
+                false
+        );
+
         countText.setTextColor(
                 CodeBoxTheme.secondaryText(activity)
         );
-        panel.addView(countText);
 
+        panel.addView(countText);
         root.addView(panel);
     }
 
@@ -160,16 +187,19 @@ public final class ProjectScreen {
         fileContainer.setOrientation(
                 LinearLayout.VERTICAL
         );
+
         fileContainer.setPadding(
                 dp(16), dp(4), dp(16), dp(12)
         );
 
         scroll.addView(fileContainer);
 
-        root.addView(scroll,
+        root.addView(
+                scroll,
                 new LinearLayout.LayoutParams(
                         -1, 0, 1
-                ));
+                )
+        );
     }
 
     private void createBottomBar(LinearLayout root) {
@@ -184,17 +214,26 @@ public final class ProjectScreen {
                 CodeBoxTheme.surface(activity)
         );
 
-        addAction(bar, "↑ Вверх",
+        addAction(
+                bar,
+                "↑ Вверх",
                 CodeBoxTheme.BLUE,
-                listener::onUp);
+                listener::onUp
+        );
 
-        addAction(bar, "+ Файл",
+        addAction(
+                bar,
+                "+ Файл",
                 CodeBoxTheme.PURPLE,
-                listener::onNewFile);
+                listener::onNewFile
+        );
 
-        addAction(bar, "+ Папка",
+        addAction(
+                bar,
+                "+ Папка",
                 CodeBoxTheme.GREEN,
-                listener::onNewFolder);
+                listener::onNewFolder
+        );
 
         root.addView(bar);
     }
@@ -205,7 +244,9 @@ public final class ProjectScreen {
             int color,
             Runnable action) {
 
-        TextView button = text(title, 13, true);
+        TextView button = text(
+                title, 13, true
+        );
 
         CodeBoxTheme.styleColoredButton(
                 button, color
@@ -221,7 +262,10 @@ public final class ProjectScreen {
         );
 
         parent.addView(button, params);
-        button.setOnClickListener(v -> action.run());
+
+        button.setOnClickListener(
+                v -> action.run()
+        );
     }
 
     public void updatePath(
@@ -240,7 +284,7 @@ public final class ProjectScreen {
         }
     }
 
-    public void showFiles(java.io.File[] files) {
+    public void showFiles(File[] files) {
 
         if (fileContainer == null) {
             return;
@@ -249,32 +293,45 @@ public final class ProjectScreen {
         fileContainer.removeAllViews();
 
         if (files == null || files.length == 0) {
+
             TextView empty = text(
                     "В этой папке пока нет файлов",
-                    15, false
+                    15,
+                    false
             );
 
             empty.setGravity(Gravity.CENTER);
+
             empty.setPadding(
-                    dp(12), dp(48), dp(12), dp(48)
+                    dp(12), dp(48),
+                    dp(12), dp(48)
             );
 
             fileContainer.addView(empty);
             return;
         }
 
-        for (java.io.File file : files) {
+        for (File file : files) {
             addFileCard(file);
         }
     }
 
-    private void addFileCard(java.io.File file) {
+    private void addFileCard(File file) {
 
-        LinearLayout card = new LinearLayout(activity);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout card =
+                new LinearLayout(activity);
+
+        card.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        card.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
         card.setPadding(
-                dp(14), dp(14), dp(14), dp(14)
+                dp(14), dp(14),
+                dp(14), dp(14)
         );
 
         CodeBoxTheme.styleCard(card);
@@ -283,22 +340,34 @@ public final class ProjectScreen {
 
         TextView symbol = text(
                 folder ? "📁" : "📄",
-                27, false
+                27,
+                false
         );
 
         symbol.setGravity(Gravity.CENTER);
 
-        card.addView(symbol,
+        card.addView(
+                symbol,
                 new LinearLayout.LayoutParams(
                         dp(48), dp(48)
-                ));
+                )
+        );
 
-        LinearLayout labels = new LinearLayout(activity);
-        labels.setOrientation(LinearLayout.VERTICAL);
-        labels.setPadding(dp(10), 0, 0, 0);
+        LinearLayout labels =
+                new LinearLayout(activity);
+
+        labels.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        labels.setPadding(
+                dp(10), 0, 0, 0
+        );
 
         TextView name = text(
-                file.getName(), 16, true
+                file.getName(),
+                16,
+                true
         );
 
         name.setMaxLines(2);
@@ -306,23 +375,31 @@ public final class ProjectScreen {
 
         TextView type = text(
                 folder ? "Папка" : "Файл",
-                12, false
+                12,
+                false
         );
 
         type.setTextColor(
                 CodeBoxTheme.secondaryText(activity)
         );
+
         labels.addView(type);
 
-        card.addView(labels,
+        card.addView(
+                labels,
                 new LinearLayout.LayoutParams(
                         0, -2, 1
-                ));
+                )
+        );
 
-        TextView arrow = text("›", 28, false);
+        TextView arrow = text(
+                "›", 28, false
+        );
+
         arrow.setTextColor(
                 CodeBoxTheme.secondaryText(activity)
         );
+
         card.addView(arrow);
 
         LinearLayout.LayoutParams params =
@@ -332,10 +409,19 @@ public final class ProjectScreen {
 
         params.bottomMargin = dp(10);
 
-        fileContainer.addView(card, params);
+        fileContainer.addView(
+                card, params
+        );
 
+        // Обычное нажатие: открыть файл или папку.
         card.setOnClickListener(
                 v -> listener.onFileSelected(file)
         );
+
+        // Долгое нажатие: меню действий.
+        card.setOnLongClickListener(v -> {
+            listener.onFileLongPressed(file);
+            return true;
+        });
     }
 }

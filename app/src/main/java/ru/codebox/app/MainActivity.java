@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.app.Activity;
@@ -500,8 +499,6 @@ public class MainActivity extends Activity
 
         list.addView(card, params);
 
-        // Главное изменение:
-        // открываем настоящее дерево проекта.
         card.setOnClickListener(
                 v -> openProjectTree(
                         project.getName()
@@ -629,6 +626,25 @@ public class MainActivity extends Activity
         startActivity(intent);
     }
 
+    // Настоящая библиотека кода.
+    private void openCodeLibrary() {
+        Intent intent = new Intent(
+                this,
+                CodeLibraryActivity.class
+        );
+
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(
+                    this,
+                    "Не удалось открыть библиотеку: "
+                            + e.getMessage(),
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
     @Override
     public void onCreateProject() {
         showCreateProjectDialog();
@@ -646,9 +662,7 @@ public class MainActivity extends Activity
 
     @Override
     public void onOpenCodeLibrary() {
-        showComingSoon(
-                "Библиотека кода"
-        );
+        openCodeLibrary();
     }
 
     @Override

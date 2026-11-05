@@ -131,6 +131,11 @@ public final class GradleProjectManager {
                 "com.example."
                 + name.toLowerCase(Locale.ROOT);
 
+        String javaPath =
+                "app/src/main/java/"
+                + packageName.replace('.', '/')
+                + "/MainActivity.java";
+
         createIfAbsent(
                 getChild(project, "settings.gradle"),
                 "pluginManagement {\n"
@@ -204,14 +209,64 @@ public final class GradleProjectManager {
                 + "encoding=\"utf-8\"?>\n"
                 + "<manifest xmlns:android="
                 + "\"http://schemas.android.com/"
-                + "apk/res/android\">\n"
-                + "    <application "
-                + "android:label=\"" + name + "\" "
-                + "android:theme="
+                + "apk/res/android\">\n\n"
+                + "    <application\n"
+                + "        android:label=\"" + name + "\"\n"
+                + "        android:theme="
                 + "\"@android:style/"
-                + "Theme.Material.Light.NoActionBar\""
-                + " />\n"
+                + "Theme.Material.Light.NoActionBar\">\n\n"
+                + "        <activity\n"
+                + "            android:name=\".MainActivity\"\n"
+                + "            android:exported=\"true\">\n"
+                + "            <intent-filter>\n"
+                + "                <action android:name="
+                + "\"android.intent.action.MAIN\" />\n"
+                + "                <category android:name="
+                + "\"android.intent.category.LAUNCHER\" />\n"
+                + "            </intent-filter>\n"
+                + "        </activity>\n\n"
+                + "    </application>\n"
                 + "</manifest>\n"
+        );
+
+        createIfAbsent(
+                getChild(project, javaPath),
+                "package " + packageName + ";\n\n"
+                + "import android.app.Activity;\n"
+                + "import android.os.Bundle;\n"
+                + "import android.graphics.Color;\n"
+                + "import android.view.Gravity;\n"
+                + "import android.widget.LinearLayout;\n"
+                + "import android.widget.TextView;\n\n"
+                + "public class MainActivity "
+                + "extends Activity {\n\n"
+                + "    @Override\n"
+                + "    protected void onCreate("
+                + "Bundle savedInstanceState) {\n"
+                + "        super.onCreate("
+                + "savedInstanceState);\n\n"
+                + "        LinearLayout layout = "
+                + "new LinearLayout(this);\n"
+                + "        layout.setOrientation("
+                + "LinearLayout.VERTICAL);\n"
+                + "        layout.setGravity("
+                + "Gravity.CENTER);\n"
+                + "        layout.setPadding(24, 24, 24, 24);\n"
+                + "        layout.setBackgroundColor("
+                + "Color.WHITE);\n\n"
+                + "        TextView title = "
+                + "new TextView(this);\n"
+                + "        title.setText(\""
+                + "Hello from CodeBox 5!\");\n"
+                + "        title.setTextSize(24);\n"
+                + "        title.setTextColor("
+                + "Color.rgb(100, 60, 180));\n"
+                + "        title.setGravity("
+                + "Gravity.CENTER);\n\n"
+                + "        layout.addView(title);\n"
+                + "        setContentView(layout);\n"
+                + "    }\n"
+                + "}\n"
         );
     }
 

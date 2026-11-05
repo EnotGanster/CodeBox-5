@@ -1,6 +1,7 @@
 package ru.codebox.app;
 
 import android.content.Context;
+import android.os.Build;
 
 import java.io.File;
 import java.io.IOException;
@@ -12,8 +13,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/** In-process ECJ compiler. APK/AAB packaging is not performed here. */
+/**
+ * In-process ECJ compiler with Android runtime diagnostics.
+ *
+ * Runs on a background thread.
+ * Does not package APK or AAB.
+ */
 public final class CodeBoxEcjCompiler {
+
     private static final int MAX_SOURCES = 5000;
     private static final int MAX_DEPTH = 40;
 
@@ -23,7 +30,12 @@ public final class CodeBoxEcjCompiler {
         public final String report;
         public final File classesDirectory;
 
-        private Result(boolean compiled, int sourceCount, String report, File classesDirectory) {
+        private Result(
+                boolean compiled,
+                int sourceCount,
+                String report,
+                File classesDirectory
+        ) {
             this.compiled = compiled;
             this.sourceCount = sourceCount;
             this.report = report;
@@ -31,143 +43,398 @@ public final class CodeBoxEcjCompiler {
         }
     }
 
-    private CodeBoxEcjCompiler() { }
+    private CodeBoxEcjCompiler() {
+    }
 
-    /**
-     * Runs ECJ on the calling thread; invoke from a background thread.
-     * Requires an Android API android.jar in the private build-tools directory.
-     * The ECJ library must already be bundled in the CodeBox APK.
-     */
-    public static Result compile(Context context, File projectDirectory) throws IOException {
+    public static Result compile(
+            Context context,
+            File projectDirectory
+    ) throws IOException {
+
         if (context == null || projectDirectory == null) {
-            throw new IllegalArgumentException("Не указан Context или каталог проекта");
+            throw new IllegalArgumentException(
+                    "Не указан Context или каталог проекта"
+            );
         }
 
-        File root = new File(context.getFilesDir(), "projects").getCanonicalFile();
+        File projectsRoot = new File(
+                context.getFilesDir(), "projects"
+        ).getCanonicalFile();
+
         File project = projectDirectory.getCanonicalFile();
-        if (!root.equals(project.getParentFile()) || !project.isDirectory()) {
-            throw new IOException("Проект должен находиться непосредственно в каталоге projects");
+
+        if (!projectsRoot.equals(project.getParentFile())
+                || !project.isDirectory()) {
+            throw new IOException(
+                    "Проект должен находиться в каталоге projects"
+            );
         }
 
-        File sourceRoot = new File(project, "app/src/main/java").getCanonicalFile();
-        if (!inside(project, sourceRoot) || !sourceRoot.isDirectory()) {
-            throw new IOException("Каталог app/src/main/java не найден или недопустим");
+        File sourceRoot = new File(
+                project, "app/src/main/java"
+        ).getCanonicalFile();
+
+        if (!inside(project, sourceRoot)
+                || !sourceRoot.isDirectory()) {
+            throw new IOException(
+                    "Каталог Java-исходников отсутствует или недопустим"
+            );
         }
 
         List<File> sources = new ArrayList<>();
         collect(sourceRoot, sourceRoot, sources, 0);
-        Collections.sort(sources, (a, b) -> a.getPath().compareTo(b.getPath()));
 
-        File tools = new File(context.getFilesDir(), "build-tools").getCanonicalFile();
-        File androidJar = new File(tools, "android.jar").getCanonicalFile();
-        File output = new File(context.getCacheDir(), "ecj-classes-" + project.getName()).getCanonicalFile();
-        if (!inside(context.getCacheDir().getCanonicalFile(), output)) {
-            throw new IOException("Недопустимый каталог результата");
+        Collections.sort(
+                sources,
+                (a, b) -> a.getPath().compareTo(b.getPath())
+        );
+
+        File tools = new File(
+                context.getFilesDir(), "build-tools"
+        ).getCanonicalFile();
+
+        File androidJar = new File(
+                tools, "android.jar"
+        ).getCanonicalFile();
+
+        File cacheRoot = context.getCacheDir().getCanonicalFile();
+
+        File output = new File(
+                cacheRoot, "ecj-classes-" + project.getName()
+        ).getCanonicalFile();
+
+        if (!inside(cacheRoot, output)
+                || output.equals(cacheRoot)) {
+            throw new IOException(
+                    "Недопустимый каталог результата"
+            );
         }
 
-        StringBuilder log = new StringBuilder("CodeBox 5 — ECJ\n");
+        StringBuilder log = new StringBuilder();
+
+        log.append("CodeBox 5 — ECJ Diagnostics\n");
         log.append("Проект: ").append(project.getName()).append('\n');
-        log.append("Исходников: ").append(sources.size()).append('\n');
-        for (File file : sources) {
-            log.append("  ").append(sourceRoot.toURI().relativize(file.toURI()).getPath()).append('\n');
+        log.append("Android API устройства: ")
+                .append(Build.VERSION.SDK_INT).append('\n');
+        log.append("Java runtime: ")
+                .append(System.getProperty("java.version", "unknown"))
+                .append('\n');
+
+        log.append("Исходников: ")
+                .append(sources.size()).append('\n');
+
+        for (File source : sources) {
+            log.append("  ")
+                    .append(sourceRoot.toURI()
+                            .relativize(source.toURI())
+                            .getPath())
+                    .append('\n');
         }
+
+        log.append("\n--- Проверка Java API ---\n");
+
+        String[] requiredClasses = {
+                "javax.lang.model.SourceVersion",
+                "javax.lang.model.element.Element",
+                "javax.lang.model.type.TypeMirror",
+                "javax.annotation.processing.Processor",
+                "javax.tools.JavaFileObject",
+                "javax.tools.Diagnostic",
+                "org.eclipse.jdt.core.compiler.batch.BatchCompiler"
+        };
+
+        ClassLoader loader =
+                CodeBoxEcjCompiler.class.getClassLoader();
+
+        for (String className : requiredClasses) {
+            try {
+                Class.forName(className, false, loader);
+                log.append("OK: ").append(className).append('\n');
+            } catch (ClassNotFoundException e) {
+                log.append("MISSING: ")
+                        .append(className).append('\n');
+            } catch (LinkageError | RuntimeException e) {
+                log.append("ERROR: ")
+                        .append(className)
+                        .append(" — ")
+                        .append(e)
+                        .append('\n');
+            }
+        }
+
+        log.append("\n--- Android API ---\n");
+
+        if (!tools.equals(androidJar.getParentFile())
+                || !androidJar.isFile()
+                || androidJar.length() == 0) {
+
+            log.append(
+                    "ERROR: Не найден build-tools/android.jar\n"
+            );
+
+            log.append("Результат: FAILED\n");
+
+            return new Result(
+                    false,
+                    sources.size(),
+                    log.toString(),
+                    output
+            );
+        }
+
+        log.append("android.jar: ")
+                .append(androidJar.getAbsolutePath())
+                .append('\n');
+
+        log.append("Размер: ")
+                .append(androidJar.length())
+                .append(" байт\n");
 
         if (sources.isEmpty()) {
-            log.append("ERROR: Нет Java-файлов для компиляции.\n");
-            return new Result(false, 0, log.toString(), output);
-        }
-        if (!tools.equals(androidJar.getParentFile()) || !androidJar.isFile() || androidJar.length() == 0) {
-            log.append("ERROR: Не найден непустой build-tools/android.jar.\n");
-            log.append("ECJ включён в APK, но Android API нужен отдельно.\n");
-            return new Result(false, sources.size(), log.toString(), output);
+            log.append("ERROR: Нет Java-исходников\n");
+            log.append("Результат: FAILED\n");
+
+            return new Result(
+                    false,
+                    0,
+                    log.toString(),
+                    output
+            );
         }
 
-        // Do not allow stale class files to be mistaken for fresh output.
         deleteTree(output);
+
         if (!output.mkdirs()) {
-            throw new IOException("Не удалось создать каталог для class-файлов");
+            throw new IOException(
+                    "Не удалось создать каталог классов"
+            );
         }
 
-        List<String> args = new ArrayList<>();
-        args.add("-encoding");
-        args.add("UTF-8");
-        args.add("-source");
-        args.add("8");
-        args.add("-target");
-        args.add("8");
-        args.add("-proc:none");
-        args.add("-classpath");
-        args.add(androidJar.getAbsolutePath());
-        args.add("-d");
-        args.add(output.getAbsolutePath());
-        for (File file : sources) args.add(file.getAbsolutePath());
+        List<String> arguments = new ArrayList<>();
+
+        arguments.add("-encoding");
+        arguments.add("UTF-8");
+
+        arguments.add("-source");
+        arguments.add("8");
+
+        arguments.add("-target");
+        arguments.add("8");
+
+        arguments.add("-proc:none");
+
+        arguments.add("-classpath");
+        arguments.add(androidJar.getAbsolutePath());
+
+        arguments.add("-d");
+        arguments.add(output.getAbsolutePath());
+
+        for (File source : sources) {
+            arguments.add(source.getAbsolutePath());
+        }
 
         StringWriter stdout = new StringWriter();
         StringWriter stderr = new StringWriter();
+
         boolean success = false;
+
+        log.append("\n--- Запуск ECJ ---\n");
+
         try {
-            Class<?> compiler = Class.forName("org.eclipse.jdt.core.compiler.batch.BatchCompiler");
-            Method method = null;
+            Class<?> compiler = Class.forName(
+                    "org.eclipse.jdt.core.compiler.batch.BatchCompiler",
+                    true,
+                    loader
+            );
+
+            Method compileMethod = null;
+
             for (Method candidate : compiler.getMethods()) {
-                Class<?>[] parameters = candidate.getParameterTypes();
-                if (candidate.getName().equals("compile") && parameters.length == 4
+                Class<?>[] parameters =
+                        candidate.getParameterTypes();
+
+                if (candidate.getName().equals("compile")
+                        && parameters.length == 4
                         && parameters[0] == String[].class
                         && parameters[1] == PrintWriter.class
                         && parameters[2] == PrintWriter.class) {
-                    method = candidate;
+
+                    compileMethod = candidate;
                     break;
                 }
             }
-            if (method == null) {
-                log.append("ERROR: Метод ECJ BatchCompiler.compile не найден.\n");
+
+            if (compileMethod == null) {
+                log.append(
+                        "ERROR: BatchCompiler.compile не найден\n"
+                );
             } else {
-                Object value = method.invoke(null, args.toArray(new String[0]),
-                        new PrintWriter(stdout, true), new PrintWriter(stderr, true), null);
+                Object value = compileMethod.invoke(
+                        null,
+                        arguments.toArray(new String[0]),
+                        new PrintWriter(stdout, true),
+                        new PrintWriter(stderr, true),
+                        null
+                );
+
                 success = Boolean.TRUE.equals(value);
             }
-        } catch (ClassNotFoundException e) {
-            log.append("ERROR: ECJ не найден в APK. Проверьте зависимость Gradle.\n");
+
         } catch (InvocationTargetException e) {
-            log.append("ERROR: ECJ завершился исключением: ")
-                    .append(e.getCause() == null ? e : e.getCause()).append('\n');
-        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
-            log.append("ERROR: Невозможно запустить ECJ: ").append(e).append('\n');
+            log.append("ERROR: ECJ выбросил исключение\n");
+
+            Throwable cause = e.getCause() != null
+                    ? e.getCause()
+                    : e;
+
+            appendThrowable(log, cause);
+
+        } catch (ClassNotFoundException e) {
+            log.append("ERROR: Класс ECJ не найден\n");
+            appendThrowable(log, e);
+
+        } catch (ReflectiveOperationException e) {
+            log.append("ERROR: Ошибка вызова ECJ\n");
+            appendThrowable(log, e);
+
+        } catch (LinkageError e) {
+            log.append("ERROR: Ошибка совместимости классов\n");
+            appendThrowable(log, e);
+
+        } catch (RuntimeException e) {
+            log.append("ERROR: Ошибка выполнения ECJ\n");
+            appendThrowable(log, e);
         }
-        log.append("ECJ stdout:\n").append(stdout).append('\n');
-        log.append("ECJ stderr:\n").append(stderr).append('\n');
-        log.append("Результат: ").append(success ? "COMPILED" : "FAILED").append('\n');
-        log.append("Каталог классов: ").append(output.getAbsolutePath()).append('\n');
-        return new Result(success, sources.size(), log.toString(), output);
+
+        log.append("\n--- ECJ stdout ---\n");
+        log.append(stdout.toString()).append('\n');
+
+        log.append("\n--- ECJ stderr ---\n");
+        log.append(stderr.toString()).append('\n');
+
+        log.append("\nРезультат: ")
+                .append(success ? "COMPILED" : "FAILED")
+                .append('\n');
+
+        log.append("Каталог классов: ")
+                .append(output.getAbsolutePath())
+                .append('\n');
+
+        return new Result(
+                success,
+                sources.size(),
+                log.toString(),
+                output
+        );
     }
 
-    private static void collect(File root, File dir, List<File> out, int depth) throws IOException {
-        if (depth > MAX_DEPTH) throw new IOException("Превышена глубина каталогов");
-        File[] children = dir.listFiles();
-        if (children == null) throw new IOException("Не удалось прочитать " + dir);
+    private static void appendThrowable(
+            StringBuilder log,
+            Throwable throwable
+    ) {
+        if (throwable == null) {
+            return;
+        }
+
+        StringWriter buffer = new StringWriter();
+        PrintWriter writer = new PrintWriter(buffer);
+
+        throwable.printStackTrace(writer);
+        writer.flush();
+
+        log.append(buffer.toString()).append('\n');
+    }
+
+    private static void collect(
+            File root,
+            File directory,
+            List<File> output,
+            int depth
+    ) throws IOException {
+
+        if (depth > MAX_DEPTH) {
+            throw new IOException(
+                    "Превышена глубина каталогов"
+            );
+        }
+
+        File[] children = directory.listFiles();
+
+        if (children == null) {
+            throw new IOException(
+                    "Не удалось прочитать каталог: " + directory
+            );
+        }
+
         for (File child : children) {
             File canonical = child.getCanonicalFile();
-            if (!inside(root, canonical)) throw new IOException("Путь вне каталога Java");
-            if (canonical.isDirectory()) collect(root, canonical, out, depth + 1);
-            else if (canonical.isFile() && canonical.getName().endsWith(".java")) {
-                if (out.size() >= MAX_SOURCES) throw new IOException("Превышен лимит 5000 Java-файлов");
-                out.add(canonical);
+
+            if (!inside(root, canonical)) {
+                throw new IOException(
+                        "Путь вне каталога Java"
+                );
+            }
+
+            if (canonical.isDirectory()) {
+                collect(
+                        root,
+                        canonical,
+                        output,
+                        depth + 1
+                );
+            } else if (canonical.isFile()
+                    && canonical.getName().endsWith(".java")) {
+
+                if (output.size() >= MAX_SOURCES) {
+                    throw new IOException(
+                            "Превышен лимит 5000 Java-файлов"
+                    );
+                }
+
+                output.add(canonical);
             }
         }
     }
 
-    private static boolean inside(File root, File child) throws IOException {
+    private static boolean inside(
+            File root,
+            File child
+    ) throws IOException {
+
         String base = root.getCanonicalPath();
         String path = child.getCanonicalPath();
-        return path.equals(base) || path.startsWith(base + File.separator);
+
+        return path.equals(base)
+                || path.startsWith(
+                        base + File.separator
+                );
     }
 
-    private static void deleteTree(File file) throws IOException {
-        if (!file.exists()) return;
+    private static void deleteTree(File file)
+            throws IOException {
+
+        if (!file.exists()) {
+            return;
+        }
+
         if (file.isDirectory()) {
             File[] children = file.listFiles();
-            if (children == null) throw new IOException("Не удалось прочитать " + file);
-            for (File child : children) deleteTree(child);
+
+            if (children == null) {
+                throw new IOException(
+                        "Не удалось прочитать " + file
+                );
+            }
+
+            for (File child : children) {
+                deleteTree(child);
+            }
         }
-        if (!file.delete()) throw new IOException("Не удалось очистить " + file);
+
+        if (!file.delete()) {
+            throw new IOException(
+                    "Не удалось удалить " + file
+            );
+        }
     }
 }

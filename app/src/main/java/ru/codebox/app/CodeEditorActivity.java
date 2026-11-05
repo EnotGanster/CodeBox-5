@@ -14,7 +14,6 @@ import android.text.Layout;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -38,18 +37,18 @@ public class CodeEditorActivity extends Activity {
     private static final int EDITOR_TEXT = 0xFFE5E7EB;
     private static final int EDITOR_MUTED = 0xFF9298AB;
     private static final int PANEL_BG = 0xFF242635;
-    private static final int PURPLE = 0xFF7650E8;
 
     private CodeEditText editor;
     private TextView title;
     private TextView statusText;
+    private TextView undoButton;
+    private TextView redoButton;
+
     private File currentFile;
     private String savedContent = "";
     private String currentProjectName = "";
 
     private EditorHistoryManager historyManager;
-    private Button undoButton;
-    private Button redoButton;
 
     private boolean internalEdit = false;
     private boolean pendingIndent = false;
@@ -107,7 +106,8 @@ public class CodeEditorActivity extends Activity {
 
         if (bold) {
             view.setTypeface(
-                    Typeface.DEFAULT, Typeface.BOLD
+                    Typeface.DEFAULT,
+                    Typeface.BOLD
             );
         }
 
@@ -124,12 +124,13 @@ public class CodeEditorActivity extends Activity {
         String relativePath = getIntent()
                 .getStringExtra("file_path");
 
-        if (projectName == null ||
-                !projectName.matches(
+        if (projectName == null
+                || !projectName.matches(
                         "[A-Za-z][A-Za-z0-9_]{0,49}"
-                ) ||
-                relativePath == null ||
-                relativePath.isEmpty()) {
+                )
+                || relativePath == null
+                || relativePath.isEmpty()) {
+
             showError("Неверные данные файла");
             return;
         }
@@ -148,7 +149,10 @@ public class CodeEditorActivity extends Activity {
             if (!project.getParentFile()
                     .equals(projectsRoot)
                     || !project.isDirectory()) {
-                throw new IOException("Проект не найден");
+
+                throw new IOException(
+                        "Проект не найден"
+                );
             }
 
             File file = new File(
@@ -158,6 +162,7 @@ public class CodeEditorActivity extends Activity {
             if (!file.getPath().startsWith(
                     project.getPath() + File.separator
             ) || !file.isFile()) {
+
                 throw new IOException(
                         "Файл недоступен или вне проекта"
                 );
@@ -165,14 +170,18 @@ public class CodeEditorActivity extends Activity {
 
             if (isImageFile(file)) {
                 Intent intent = new Intent(
-                        this, ImageViewerActivity.class
+                        this,
+                        ImageViewerActivity.class
                 );
 
                 intent.putExtra(
-                        "project_name", projectName
+                        "project_name",
+                        projectName
                 );
+
                 intent.putExtra(
-                        "file_path", relativePath
+                        "file_path",
+                        relativePath
                 );
 
                 startActivity(intent);
@@ -216,7 +225,9 @@ public class CodeEditorActivity extends Activity {
             throws IOException {
 
         try (java.io.InputStream input =
-                     Files.newInputStream(file.toPath())) {
+                     Files.newInputStream(
+                             file.toPath()
+                     )) {
 
             byte[] buffer = new byte[4096];
             int count = input.read(buffer);
@@ -232,8 +243,14 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void buildEditor() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout root =
+                new LinearLayout(this);
+
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
         root.setBackgroundColor(
                 CodeBoxTheme.background(this)
         );
@@ -246,9 +263,8 @@ public class CodeEditorActivity extends Activity {
 
         setContentView(root);
 
-        historyManager = new EditorHistoryManager(
-                editor
-        );
+        historyManager =
+                new EditorHistoryManager(editor);
 
         editor.addTextChangedListener(
                 new TextWatcher() {
@@ -272,10 +288,10 @@ public class CodeEditorActivity extends Activity {
                     int before,
                     int count) {
 
-                if (internalEdit ||
-                        before != 0 ||
-                        count != 1 ||
-                        start >= s.length()) {
+                if (internalEdit
+                        || before != 0
+                        || count != 1
+                        || start >= s.length()) {
                     return;
                 }
 
@@ -300,7 +316,8 @@ public class CodeEditorActivity extends Activity {
 
                 if (isClosingCharacter(typed)
                         && start + 1 < s.length()
-                        && s.charAt(start + 1) == typed) {
+                        && s.charAt(start + 1)
+                        == typed) {
 
                     pendingSkip = true;
                     skipPosition = start;
@@ -354,14 +371,16 @@ public class CodeEditorActivity extends Activity {
         });
 
         CodeSyntaxHighlighter.highlight(
-                editor, currentFile.getName()
+                editor,
+                currentFile.getName()
         );
 
         updateTitle();
         updateHistoryButtons();
     }
 
-    private void createHeader(LinearLayout root) {
+    private void createHeader(
+            LinearLayout root) {
 
         LinearLayout header =
                 new LinearLayout(this);
@@ -370,32 +389,71 @@ public class CodeEditorActivity extends Activity {
                 LinearLayout.HORIZONTAL
         );
 
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        header.setPadding(
-                dp(14), dp(14),
-                dp(14), dp(14)
+        header.setGravity(
+                Gravity.CENTER_VERTICAL
         );
 
-        header.setBackground(headerGradient());
+        header.setPadding(
+                dp(10), dp(9),
+                dp(10), dp(9)
+        );
 
-        TextView back = text("‹", 32, true);
-        back.setTextColor(0xFFFFFFFF);
-        back.setGravity(Gravity.CENTER);
+        header.setBackground(
+                headerGradient()
+        );
 
-        back.setBackground(
-                rounded(0x33FFFFFF, 15)
+        TextView home = text(
+                "⌂", 25, true
+        );
+
+        home.setTextColor(0xFFFFFFFF);
+        home.setGravity(Gravity.CENTER);
+        home.setContentDescription(
+                "На главный экран"
+        );
+
+        home.setBackground(
+                rounded(0x33FFFFFF, 11)
         );
 
         header.addView(
-                back,
+                home,
                 new LinearLayout.LayoutParams(
-                        dp(44), dp(44)
+                        dp(38), dp(40)
                 )
         );
 
+        home.setOnClickListener(
+                v -> attemptExit(true)
+        );
+
+        TextView back = text(
+                "‹", 29, true
+        );
+
+        back.setTextColor(0xFFFFFFFF);
+        back.setGravity(Gravity.CENTER);
+        back.setContentDescription(
+                "Назад к файлам"
+        );
+
+        back.setBackground(
+                rounded(0x33FFFFFF, 11)
+        );
+
+        LinearLayout.LayoutParams backParams =
+                new LinearLayout.LayoutParams(
+                        dp(38), dp(40)
+                );
+
+        backParams.leftMargin = dp(5);
+
+        header.addView(
+                back, backParams
+        );
+
         back.setOnClickListener(
-                v -> attemptExit()
+                v -> attemptExit(false)
         );
 
         LinearLayout labels =
@@ -406,28 +464,32 @@ public class CodeEditorActivity extends Activity {
         );
 
         labels.setPadding(
-                dp(12), 0, dp(8), 0
+                dp(9), 0, dp(5), 0
         );
 
         title = text(
-                currentFile.getName(), 18, true
+                currentFile.getName(),
+                16,
+                true
         );
 
         title.setTextColor(0xFFFFFFFF);
         title.setSingleLine(true);
         title.setEllipsize(
-                TextUtils.TruncateAt.END
+                TextUtils.TruncateAt.MIDDLE
         );
 
         labels.addView(title);
 
         TextView subtitle = text(
-                currentProjectName + "  •  Редактор",
-                11,
+                currentProjectName
+                        + " • Редактор",
+                10,
                 false
         );
 
         subtitle.setTextColor(0xFFE8DDFF);
+        subtitle.setSingleLine(true);
 
         labels.addView(subtitle);
 
@@ -438,25 +500,29 @@ public class CodeEditorActivity extends Activity {
                 )
         );
 
-        TextView icon = text("</>", 17, true);
+        TextView icon = text(
+                "</>", 13, true
+        );
+
         icon.setTextColor(0xFFFFFFFF);
         icon.setGravity(Gravity.CENTER);
 
         icon.setBackground(
-                rounded(0x33FFFFFF, 15)
+                rounded(0x33FFFFFF, 11)
         );
 
         header.addView(
                 icon,
                 new LinearLayout.LayoutParams(
-                        dp(44), dp(44)
+                        dp(39), dp(40)
                 )
         );
 
         root.addView(header);
     }
 
-    private void createActions(LinearLayout root) {
+    private void createActions(
+            LinearLayout root) {
 
         LinearLayout toolbar =
                 new LinearLayout(this);
@@ -465,56 +531,88 @@ public class CodeEditorActivity extends Activity {
                 LinearLayout.HORIZONTAL
         );
 
-        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
 
         toolbar.setPadding(
-                dp(8), dp(10),
-                dp(8), dp(8)
+                dp(9), dp(6),
+                dp(9), dp(6)
         );
 
         toolbar.setBackgroundColor(
                 CodeBoxTheme.surface(this)
         );
 
-        undoButton = new Button(this);
-        undoButton.setText("↶");
-        undoButton.setTextSize(21);
-        undoButton.setAllCaps(false);
+        undoButton = text(
+                "↶", 23, true
+        );
+
+        undoButton.setGravity(Gravity.CENTER);
         undoButton.setContentDescription(
                 "Отменить изменение"
         );
 
-        redoButton = new Button(this);
-        redoButton.setText("↷");
-        redoButton.setTextSize(21);
-        redoButton.setAllCaps(false);
+        undoButton.setBackground(
+                rounded(
+                        CodeBoxTheme.background(this),
+                        10
+                )
+        );
+
+        redoButton = text(
+                "↷", 23, true
+        );
+
+        redoButton.setGravity(Gravity.CENTER);
         redoButton.setContentDescription(
                 "Повторить изменение"
         );
 
-        Button save = new Button(this);
-        save.setText("✓ Сохранить");
-        save.setTextSize(13);
-        save.setAllCaps(false);
-
-        toolbar.addView(
-                undoButton,
-                new LinearLayout.LayoutParams(
-                        0, dp(48), 1
+        redoButton.setBackground(
+                rounded(
+                        CodeBoxTheme.background(this),
+                        10
                 )
         );
 
-        toolbar.addView(
-                redoButton,
+        TextView save = text(
+                "✓ Сохранить", 12, true
+        );
+
+        save.setGravity(Gravity.CENTER);
+
+        CodeBoxTheme.styleColoredButton(
+                save,
+                CodeBoxTheme.PURPLE
+        );
+
+        LinearLayout.LayoutParams first =
                 new LinearLayout.LayoutParams(
-                        0, dp(48), 1
-                )
+                        0, dp(38), 1
+                );
+
+        first.rightMargin = dp(5);
+
+        toolbar.addView(
+                undoButton, first
+        );
+
+        LinearLayout.LayoutParams second =
+                new LinearLayout.LayoutParams(
+                        0, dp(38), 1
+                );
+
+        second.rightMargin = dp(5);
+
+        toolbar.addView(
+                redoButton, second
         );
 
         toolbar.addView(
                 save,
                 new LinearLayout.LayoutParams(
-                        0, dp(48), 2
+                        0, dp(38), 2
                 )
         );
 
@@ -550,13 +648,13 @@ public class CodeEditorActivity extends Activity {
                 new LinearLayout(this);
 
         wrapper.setPadding(
-                dp(12), dp(8),
-                dp(12), dp(8)
+                dp(10), dp(5),
+                dp(10), dp(5)
         );
 
         TextView snippets = text(
-                "📚  Шаблоны Java / XML",
-                14,
+                "📚 Шаблоны Java / XML",
+                12,
                 true
         );
 
@@ -570,7 +668,7 @@ public class CodeEditorActivity extends Activity {
         wrapper.addView(
                 snippets,
                 new LinearLayout.LayoutParams(
-                        -1, dp(46)
+                        -1, dp(36)
                 )
         );
 
@@ -591,7 +689,9 @@ public class CodeEditorActivity extends Activity {
                 LinearLayout.VERTICAL
         );
 
-        editorPanel.setBackgroundColor(EDITOR_BG);
+        editorPanel.setBackgroundColor(
+                EDITOR_BG
+        );
 
         LinearLayout statusBar =
                 new LinearLayout(this);
@@ -600,17 +700,23 @@ public class CodeEditorActivity extends Activity {
                 LinearLayout.HORIZONTAL
         );
 
-        statusBar.setGravity(Gravity.CENTER_VERTICAL);
-
-        statusBar.setPadding(
-                dp(14), dp(8),
-                dp(14), dp(8)
+        statusBar.setGravity(
+                Gravity.CENTER_VERTICAL
         );
 
-        statusBar.setBackgroundColor(PANEL_BG);
+        statusBar.setPadding(
+                dp(12), dp(6),
+                dp(12), dp(6)
+        );
+
+        statusBar.setBackgroundColor(
+                PANEL_BG
+        );
 
         TextView language = text(
-                getLanguageName(), 11, true
+                getLanguageName(),
+                10,
+                true
         );
 
         language.setTextColor(
@@ -625,42 +731,68 @@ public class CodeEditorActivity extends Activity {
         );
 
         statusText = text(
-                "● Сохранено", 11, false
+                "● Сохранено",
+                10,
+                false
         );
 
         statusText.setTextColor(
                 0xFF71D7A4
         );
 
-        statusBar.addView(statusText);
+        statusBar.addView(
+                statusText
+        );
 
-        editorPanel.addView(statusBar);
+        editorPanel.addView(
+                statusBar
+        );
 
         ScrollView vertical =
                 new ScrollView(this);
 
         vertical.setFillViewport(true);
-        vertical.setVerticalScrollBarEnabled(false);
+
+        vertical.setVerticalScrollBarEnabled(
+                false
+        );
 
         HorizontalScrollView horizontal =
                 new HorizontalScrollView(this);
 
         horizontal.setFillViewport(true);
-        horizontal.setHorizontalScrollBarEnabled(false);
+
+        horizontal.setHorizontalScrollBarEnabled(
+                false
+        );
 
         editor = new CodeEditText();
 
         editor.setTextSize(14);
-        editor.setTypeface(Typeface.MONOSPACE);
-        editor.setTextColor(EDITOR_TEXT);
-        editor.setHintTextColor(EDITOR_MUTED);
+        editor.setTypeface(
+                Typeface.MONOSPACE
+        );
+
+        editor.setTextColor(
+                EDITOR_TEXT
+        );
+
+        editor.setHintTextColor(
+                EDITOR_MUTED
+        );
 
         editor.setGravity(
                 Gravity.TOP | Gravity.START
         );
 
-        editor.setBackgroundColor(EDITOR_BG);
-        editor.setHorizontallyScrolling(true);
+        editor.setBackgroundColor(
+                EDITOR_BG
+        );
+
+        editor.setHorizontallyScrolling(
+                true
+        );
+
         editor.setSingleLine(false);
 
         editor.setInputType(
@@ -703,6 +835,7 @@ public class CodeEditorActivity extends Activity {
     }
 
     private String getLanguageName() {
+
         if (currentFile == null) {
             return "TEXT";
         }
@@ -713,16 +846,20 @@ public class CodeEditorActivity extends Activity {
         if (name.endsWith(".java")) {
             return "JAVA";
         }
+
         if (name.endsWith(".xml")) {
             return "XML";
         }
+
         if (name.endsWith(".gradle")
                 || name.endsWith(".gradle.kts")) {
             return "GRADLE";
         }
+
         if (name.endsWith(".json")) {
             return "JSON";
         }
+
         return "TEXT";
     }
 
@@ -735,14 +872,15 @@ public class CodeEditorActivity extends Activity {
         root.addView(
                 editorToolbar,
                 new LinearLayout.LayoutParams(
-                        -1, dp(52)
+                        -1, dp(44)
                 )
         );
     }
 
-    // Выбор сохранённого шаблона.
     private void showSnippetPicker() {
-        if (editor == null || currentFile == null) {
+
+        if (editor == null
+                || currentFile == null) {
             return;
         }
 
@@ -753,8 +891,10 @@ public class CodeEditorActivity extends Activity {
 
         if (filename.endsWith(".java")) {
             language = "java";
+
         } else if (filename.endsWith(".xml")) {
             language = "xml";
+
         } else {
             Toast.makeText(
                     this,
@@ -777,7 +917,9 @@ public class CodeEditorActivity extends Activity {
                     new ArrayList<>();
 
             for (CodeLibraryManager.Snippet snippet : all) {
-                if (language.equals(snippet.language)) {
+                if (language.equals(
+                        snippet.language
+                )) {
                     matches.add(snippet);
                 }
             }
@@ -787,39 +929,49 @@ public class CodeEditorActivity extends Activity {
                         .setTitle("📚 Шаблоны")
                         .setMessage(
                                 "Нет сохранённых шаблонов "
-                                        + language.toUpperCase(Locale.ROOT)
+                                        + language.toUpperCase(
+                                                Locale.ROOT
+                                        )
                                         + ".\n\nДобавь шаблон "
                                         + "в библиотеке кода."
                         )
                         .setPositiveButton(
                                 "Открыть библиотеку",
                                 (dialog, which) -> {
-                                    Intent intent = new Intent(
-                                            this,
-                                            CodeLibraryActivity.class
-                                    );
+                                    Intent intent =
+                                            new Intent(
+                                                    this,
+                                                    CodeLibraryActivity.class
+                                            );
+
                                     intent.putExtra(
                                             "project_name",
                                             currentProjectName
                                     );
+
                                     startActivity(intent);
                                 }
                         )
-                        .setNegativeButton("Отмена", null)
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
                         .show();
                 return;
             }
 
-            String[] names = new String[matches.size()];
+            String[] names =
+                    new String[matches.size()];
 
-            for (int i = 0; i < matches.size(); i++) {
+            for (int i = 0;
+                    i < matches.size(); i++) {
+
                 CodeLibraryManager.Snippet snippet =
                         matches.get(i);
 
                 names[i] = snippet.title
                         + (snippet.projectName.isEmpty()
-                        ? "  • Общий"
-                        : "  • Проект");
+                        ? " • Общий"
+                        : " • Проект");
             }
 
             new AlertDialog.Builder(this)
@@ -831,13 +983,16 @@ public class CodeEditorActivity extends Activity {
                                             matches.get(which)
                                     )
                     )
-                    .setNegativeButton("Отмена", null)
+                    .setNegativeButton(
+                            "Отмена", null
+                    )
                     .show();
 
         } catch (IOException e) {
             Toast.makeText(
                     this,
-                    "Ошибка библиотеки: " + e.getMessage(),
+                    "Ошибка библиотеки: "
+                            + e.getMessage(),
                     Toast.LENGTH_LONG
             ).show();
         }
@@ -849,28 +1004,36 @@ public class CodeEditorActivity extends Activity {
         String preview = snippet.code;
 
         if (preview.length() > 700) {
-            preview = preview.substring(0, 700)
-                    + "\n...";
+            preview = preview.substring(
+                    0, 700
+            ) + "\n...";
         }
 
         new AlertDialog.Builder(this)
                 .setTitle(snippet.title)
                 .setMessage(preview)
-                .setNegativeButton("Отмена", null)
+                .setNegativeButton(
+                        "Отмена", null
+                )
                 .setPositiveButton(
                         "Вставить",
                         (dialog, which) ->
-                                insertSnippet(snippet.code)
+                                insertSnippet(
+                                        snippet.code
+                                )
                 )
                 .show();
     }
 
-    private void insertSnippet(String code) {
+    private void insertSnippet(
+            String code) {
+
         if (editor == null || code == null) {
             return;
         }
 
-        Editable content = editor.getText();
+        Editable content =
+                editor.getText();
 
         if (content == null) {
             return;
@@ -901,7 +1064,9 @@ public class CodeEditorActivity extends Activity {
         internalEdit = true;
 
         try {
-            content.replace(start, end, code);
+            content.replace(
+                    start, end, code
+            );
 
             editor.setSelection(
                     Math.min(
@@ -909,6 +1074,7 @@ public class CodeEditorActivity extends Activity {
                             content.length()
                     )
             );
+
         } finally {
             internalEdit = false;
         }
@@ -929,80 +1095,107 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void scheduleHighlight() {
+
         if (editor == null) {
             return;
         }
 
-        editor.removeCallbacks(highlightTask);
+        editor.removeCallbacks(
+                highlightTask
+        );
+
         editor.postDelayed(
-                highlightTask, 250
+                highlightTask,
+                250
         );
     }
 
     private void updateHistoryButtons() {
+
         if (historyManager == null) {
             return;
         }
 
         if (undoButton != null) {
-            undoButton.setEnabled(
-                    historyManager.canUndo()
+            boolean enabled =
+                    historyManager.canUndo();
+
+            undoButton.setEnabled(enabled);
+            undoButton.setAlpha(
+                    enabled ? 1f : 0.4f
             );
         }
 
         if (redoButton != null) {
-            redoButton.setEnabled(
-                    historyManager.canRedo()
+            boolean enabled =
+                    historyManager.canRedo();
+
+            redoButton.setEnabled(enabled);
+            redoButton.setAlpha(
+                    enabled ? 1f : 0.4f
             );
         }
     }
 
     private char matchingClose(char c) {
+
         switch (c) {
             case '(':
                 return ')';
+
             case '[':
                 return ']';
+
             case '{':
                 return '}';
+
             case '"':
                 return '"';
+
             case '\'':
                 return '\'';
+
             default:
                 return 0;
         }
     }
 
     private boolean isOpeningCharacter(char c) {
-        return c == '(' || c == '[' || c == '{'
-                || c == '"' || c == '\'';
+        return c == '('
+                || c == '['
+                || c == '{'
+                || c == '"'
+                || c == '\'';
     }
 
     private boolean isClosingCharacter(char c) {
-        return c == ')' || c == ']' || c == '}'
-                || c == '"' || c == '\'';
+        return c == ')'
+                || c == ']'
+                || c == '}'
+                || c == '"'
+                || c == '\'';
     }
 
     private void insertClosingPair(
-            Editable text,
+            Editable content,
             int position,
             char closing) {
 
-        if (position < 0 ||
-                position > text.length()) {
+        if (position < 0
+                || position > content.length()) {
             return;
         }
 
-        if (position < text.length()
-                && text.charAt(position) == closing) {
+        if (position < content.length()
+                && content.charAt(position)
+                == closing) {
             return;
         }
 
         internalEdit = true;
 
         try {
-            text.insert(
+            content.insert(
                     position,
                     String.valueOf(closing)
             );
@@ -1015,23 +1208,26 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void skipExistingClosing(
-            Editable text,
+            Editable content,
             int position) {
 
-        if (position < 0 ||
-                position + 1 >= text.length()) {
+        if (position < 0
+                || position + 1 >= content.length()) {
             return;
         }
 
         internalEdit = true;
 
         try {
-            text.delete(position, position + 1);
+            content.delete(
+                    position,
+                    position + 1
+            );
 
             editor.setSelection(
                     Math.min(
                             position + 1,
-                            text.length()
+                            content.length()
                     )
             );
 
@@ -1041,29 +1237,34 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void applyAutoIndent(
-            Editable text, int position) {
+            Editable content,
+            int position) {
 
-        if (position <= 0 ||
-                position > text.length()) {
+        if (position <= 0
+                || position > content.length()) {
             return;
         }
 
         int previousLineStart =
                 position - 2;
 
-        while (previousLineStart >= 0 &&
-                text.charAt(previousLineStart) != '\n') {
+        while (previousLineStart >= 0
+                && content.charAt(
+                        previousLineStart
+                ) != '\n') {
+
             previousLineStart--;
         }
 
         previousLineStart++;
 
-        StringBuilder indent = new StringBuilder();
+        StringBuilder indent =
+                new StringBuilder();
 
         for (int i = previousLineStart;
                 i < position - 1; i++) {
 
-            char c = text.charAt(i);
+            char c = content.charAt(i);
 
             if (c == ' ' || c == '\t') {
                 indent.append(c);
@@ -1074,14 +1275,15 @@ public class CodeEditorActivity extends Activity {
 
         int last = position - 2;
 
-        while (last >= previousLineStart &&
-                Character.isWhitespace(
-                        text.charAt(last))) {
+        while (last >= previousLineStart
+                && Character.isWhitespace(
+                        content.charAt(last)
+                )) {
             last--;
         }
 
-        if (last >= previousLineStart &&
-                text.charAt(last) == '{') {
+        if (last >= previousLineStart
+                && content.charAt(last) == '{') {
             indent.append("    ");
         }
 
@@ -1092,37 +1294,46 @@ public class CodeEditorActivity extends Activity {
         internalEdit = true;
 
         try {
-            text.insert(
-                    position, indent.toString()
+            content.insert(
+                    position,
+                    indent.toString()
             );
 
             editor.setSelection(
                     Math.min(
                             position + indent.length(),
-                            text.length()
+                            content.length()
                     )
             );
+
         } finally {
             internalEdit = false;
         }
     }
 
     private boolean hasUnsavedChanges() {
-        return editor != null &&
-                !editor.getText().toString()
+
+        return editor != null
+                && !editor.getText()
+                        .toString()
                         .equals(savedContent);
     }
 
     private void updateTitle() {
-        if (title != null && currentFile != null) {
+
+        if (title != null
+                && currentFile != null) {
+
             title.setText(
-                    currentFile.getName() +
-                    (hasUnsavedChanges() ? " *" : "")
+                    currentFile.getName()
+                            + (hasUnsavedChanges()
+                            ? " *" : "")
             );
         }
 
         if (statusText != null) {
-            boolean modified = hasUnsavedChanges();
+            boolean modified =
+                    hasUnsavedChanges();
 
             statusText.setText(
                     modified
@@ -1139,7 +1350,9 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void saveFile() {
-        if (editor == null || currentFile == null) {
+
+        if (editor == null
+                || currentFile == null) {
             return;
         }
 
@@ -1155,7 +1368,9 @@ public class CodeEditorActivity extends Activity {
         String content =
                 editor.getText().toString();
 
-        Path target = currentFile.toPath();
+        Path target =
+                currentFile.toPath();
+
         Path temp = null;
 
         try {
@@ -1167,7 +1382,8 @@ public class CodeEditorActivity extends Activity {
 
             temp = Files.createTempFile(
                     target.getParent(),
-                    ".codebox-", ".tmp"
+                    ".codebox-",
+                    ".tmp"
             );
 
             Files.write(
@@ -1196,7 +1412,8 @@ public class CodeEditorActivity extends Activity {
         } catch (IOException e) {
             Toast.makeText(
                     this,
-                    "Ошибка сохранения: " + e.getMessage(),
+                    "Ошибка сохранения: "
+                            + e.getMessage(),
                     Toast.LENGTH_LONG
             ).show();
 
@@ -1210,14 +1427,18 @@ public class CodeEditorActivity extends Activity {
         }
     }
 
-    private void attemptExit() {
+    private void attemptExit(
+            boolean goHome) {
+
         if (!hasUnsavedChanges()) {
-            finish();
+            navigateAway(goHome);
             return;
         }
 
         new AlertDialog.Builder(this)
-                .setTitle("Несохранённые изменения")
+                .setTitle(
+                        "Несохранённые изменения"
+                )
                 .setMessage(
                         "Сохранить изменения перед выходом?"
                 )
@@ -1227,21 +1448,48 @@ public class CodeEditorActivity extends Activity {
                             saveFile();
 
                             if (!hasUnsavedChanges()) {
-                                finish();
+                                navigateAway(goHome);
                             }
                         }
                 )
                 .setNegativeButton(
                         "Не сохранять",
-                        (dialog, which) -> finish()
+                        (dialog, which) ->
+                                navigateAway(goHome)
                 )
-                .setNeutralButton("Отмена", null)
+                .setNeutralButton(
+                        "Отмена", null
+                )
                 .show();
     }
 
-    private void showError(String message) {
+    private void navigateAway(
+            boolean goHome) {
+
+        if (goHome) {
+            Intent intent = new Intent(
+                    this,
+                    MainActivity.class
+            );
+
+            intent.addFlags(
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP
+            );
+
+            startActivity(intent);
+        }
+
+        finish();
+    }
+
+    private void showError(
+            String message) {
+
         new AlertDialog.Builder(this)
-                .setTitle("Ошибка редактора")
+                .setTitle(
+                        "Ошибка редактора"
+                )
                 .setMessage(
                         message == null
                                 ? "Неизвестная ошибка"
@@ -1256,39 +1504,54 @@ public class CodeEditorActivity extends Activity {
     }
 
     @Override
-    protected void onDestroy() {
-        if (editor != null) {
-            editor.removeCallbacks(highlightTask);
-        }
-        super.onDestroy();
+    public void onBackPressed() {
+        attemptExit(false);
     }
 
     @Override
-    public void onBackPressed() {
-        attemptExit();
+    protected void onDestroy() {
+
+        if (editor != null) {
+            editor.removeCallbacks(
+                    highlightTask
+            );
+        }
+
+        super.onDestroy();
     }
 
-    private class CodeEditText extends EditText {
+    private class CodeEditText
+            extends EditText {
 
-        private final Paint linePaint = new Paint(
-                Paint.ANTI_ALIAS_FLAG
-        );
+        private final Paint linePaint =
+                new Paint(
+                        Paint.ANTI_ALIAS_FLAG
+                );
 
         CodeEditText() {
             super(CodeEditorActivity.this);
 
-            linePaint.setColor(EDITOR_MUTED);
-            linePaint.setTextSize(dp(12));
+            linePaint.setColor(
+                    EDITOR_MUTED
+            );
+
+            linePaint.setTextSize(
+                    dp(12)
+            );
+
             linePaint.setTypeface(
                     Typeface.MONOSPACE
             );
+
             linePaint.setTextAlign(
                     Paint.Align.RIGHT
             );
         }
 
         @Override
-        protected void onDraw(Canvas canvas) {
+        protected void onDraw(
+                Canvas canvas) {
+
             super.onDraw(canvas);
 
             Layout layout = getLayout();
@@ -1297,19 +1560,30 @@ public class CodeEditorActivity extends Activity {
                 return;
             }
 
-            CharSequence content = getText();
+            CharSequence content =
+                    getText();
 
             int number = 1;
             int length = content.length();
 
-            drawNumber(canvas, layout, 0, number);
+            drawNumber(
+                    canvas,
+                    layout,
+                    0,
+                    number
+            );
 
-            for (int i = 0; i < length; i++) {
+            for (int i = 0;
+                    i < length; i++) {
+
                 if (content.charAt(i) == '\n') {
                     number++;
+
                     drawNumber(
-                            canvas, layout,
-                            i + 1, number
+                            canvas,
+                            layout,
+                            i + 1,
+                            number
                     );
                 }
             }
@@ -1321,15 +1595,19 @@ public class CodeEditorActivity extends Activity {
                 int offset,
                 int number) {
 
-            int line = layout.getLineForOffset(
-                    Math.min(
-                            offset,
-                            getText().length()
-                    )
-            );
+            int line =
+                    layout.getLineForOffset(
+                            Math.min(
+                                    offset,
+                                    getText().length()
+                            )
+                    );
 
-            float y = getTotalPaddingTop()
-                    + layout.getLineBaseline(line);
+            float y =
+                    getTotalPaddingTop()
+                    + layout.getLineBaseline(
+                            line
+                    );
 
             canvas.drawText(
                     String.valueOf(number),

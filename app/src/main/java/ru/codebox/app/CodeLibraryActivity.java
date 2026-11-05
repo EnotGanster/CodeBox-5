@@ -5,12 +5,13 @@ import android.app.AlertDialog;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -21,7 +22,9 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 public class CodeLibraryActivity extends Activity {
 
@@ -32,15 +35,132 @@ public class CodeLibraryActivity extends Activity {
     private LinearLayout content;
     private Spinner projectSpinner;
 
+    private TextView snippetsTab;
+    private TextView gradleTab;
+
     private String selectedProject = "";
     private boolean showingGradle = false;
 
-    private int dp(int value) {
-        return (int) (
-                value * getResources()
-                        .getDisplayMetrics().density
-                        + 0.5f
+    private int dp(float value) {
+        return CodeBoxTheme.dp(this, value);
+    }
+
+    private LinearLayout column() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        return layout;
+    }
+
+    private TextView text(
+            String value, int size, boolean bold) {
+
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(
+                CodeBoxTheme.textColor(this)
         );
+
+        if (bold) {
+            view.setTypeface(
+                    Typeface.DEFAULT,
+                    Typeface.BOLD
+            );
+        }
+
+        return view;
+    }
+
+    private GradientDrawable rounded(
+            int color, int radius) {
+
+        GradientDrawable drawable =
+                new GradientDrawable();
+
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radius));
+        return drawable;
+    }
+
+    private GradientDrawable headerGradient() {
+        return new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        0xFF8657F5,
+                        0xFF6535D5,
+                        0xFF4522A3
+                }
+        );
+    }
+
+    private void addSpacing(
+            LinearLayout parent, int height) {
+
+        View space = new View(this);
+
+        parent.addView(
+                space,
+                new LinearLayout.LayoutParams(
+                        1, dp(height)
+                )
+        );
+    }
+
+    private void addCard(
+            LinearLayout parent,
+            LinearLayout card) {
+
+        CodeBoxTheme.styleCard(card);
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                );
+
+        params.bottomMargin = dp(12);
+        parent.addView(card, params);
+    }
+
+    private TextView actionButton(
+            String value, int color) {
+
+        TextView button = text(
+                value, 14, true
+        );
+
+        button.setGravity(Gravity.CENTER);
+
+        CodeBoxTheme.styleColoredButton(
+                button, color
+        );
+
+        button.setMinHeight(dp(46));
+
+        return button;
+    }
+
+    private TextView secondaryButton(String value) {
+
+        TextView button = text(
+                value, 13, true
+        );
+
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(
+                dp(12), dp(10),
+                dp(12), dp(10)
+        );
+
+        button.setBackground(
+                rounded(
+                        CodeBoxTheme.isDark(this)
+                                ? 0xFF353047
+                                : 0xFFF0ECF9,
+                        12
+                )
+        );
+
+        return button;
     }
 
     @Override
@@ -51,6 +171,7 @@ public class CodeLibraryActivity extends Activity {
             manager = new CodeLibraryManager(this);
             gradleManager =
                     new GradleProjectManager(this);
+
         } catch (IOException e) {
             showError(e.getMessage());
             return;
@@ -68,91 +189,25 @@ public class CodeLibraryActivity extends Activity {
 
     private void buildScreen() {
 
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFFF4F5F8);
+        root = column();
 
-        TextView title = new TextView(this);
-        title.setText("📚 Библиотека кода");
-        title.setTextSize(22);
-        title.setTypeface(
-                Typeface.DEFAULT,
-                Typeface.BOLD
-        );
-        title.setTextColor(0xFF222233);
-        title.setPadding(
-                dp(16), dp(18),
-                dp(16), dp(12)
-        );
-        root.addView(title);
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText(
-                "Шаблоны Java/XML и Gradle-библиотеки"
-        );
-        subtitle.setTextSize(13);
-        subtitle.setTextColor(0xFF777788);
-        subtitle.setPadding(
-                dp(16), 0,
-                dp(16), dp(12)
-        );
-        root.addView(subtitle);
-
-        TextView projectLabel = new TextView(this);
-        projectLabel.setText("Выбранный проект");
-        projectLabel.setTextSize(14);
-        projectLabel.setPadding(
-                dp(16), dp(8),
-                dp(16), dp(4)
-        );
-        root.addView(projectLabel);
-
-        projectSpinner = new Spinner(this);
-
-        root.addView(
-                projectSpinner,
-                new LinearLayout.LayoutParams(
-                        -1, dp(52)
-                )
+        root.setBackgroundColor(
+                CodeBoxTheme.background(this)
         );
 
-        setupProjects();
-
-        LinearLayout tabs = new LinearLayout(this);
-        tabs.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button snippetsButton =
-                createButton("📄 Шаблоны");
-
-        Button gradleButton =
-                createButton("📦 Gradle");
-
-        tabs.addView(
-                snippetsButton,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 1
-                )
-        );
-
-        tabs.addView(
-                gradleButton,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 1
-                )
-        );
-
-        root.addView(tabs);
+        createHeader();
+        createProjectSelector();
+        createTabs();
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(false);
 
-        content = new LinearLayout(this);
-        content.setOrientation(
-                LinearLayout.VERTICAL
-        );
+        content = column();
+
         content.setPadding(
-                dp(12), dp(12),
-                dp(12), dp(20)
+                dp(16), dp(14),
+                dp(16), dp(24)
         );
 
         scroll.addView(content);
@@ -164,32 +219,160 @@ public class CodeLibraryActivity extends Activity {
                 )
         );
 
-        Button backButton =
-                createButton("← Назад");
+        setContentView(root);
+        refreshContent();
+    }
 
-        root.addView(
-                backButton,
+    private void createHeader() {
+
+        LinearLayout header =
+                new LinearLayout(this);
+
+        header.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        header.setPadding(
+                dp(16), dp(20),
+                dp(16), dp(20)
+        );
+
+        header.setBackground(headerGradient());
+
+        TextView back = text(
+                "‹", 34, true
+        );
+
+        back.setTextColor(Color.WHITE);
+        back.setGravity(Gravity.CENTER);
+
+        back.setBackground(
+                rounded(0x33FFFFFF, 15)
+        );
+
+        header.addView(
+                back,
                 new LinearLayout.LayoutParams(
-                        -1, dp(52)
+                        dp(46), dp(46)
                 )
         );
 
-        snippetsButton.setOnClickListener(v -> {
-            showingGradle = false;
-            refreshContent();
-        });
+        back.setOnClickListener(v -> finish());
 
-        gradleButton.setOnClickListener(v -> {
-            showingGradle = true;
-            refreshContent();
-        });
+        LinearLayout labels = column();
 
-        backButton.setOnClickListener(
-                v -> finish()
+        labels.setPadding(
+                dp(14), 0, dp(8), 0
         );
 
-        setContentView(root);
-        refreshContent();
+        TextView title = text(
+                "Библиотека кода",
+                21,
+                true
+        );
+
+        title.setTextColor(Color.WHITE);
+        title.setSingleLine(true);
+
+        title.setEllipsize(
+                TextUtils.TruncateAt.END
+        );
+
+        labels.addView(title);
+
+        TextView subtitle = text(
+                "ШАБЛОНЫ И GRADLE",
+                11,
+                true
+        );
+
+        subtitle.setTextColor(0xFFE8DDFF);
+
+        LinearLayout.LayoutParams subParams =
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                );
+
+        subParams.topMargin = dp(4);
+
+        labels.addView(subtitle, subParams);
+
+        header.addView(
+                labels,
+                new LinearLayout.LayoutParams(
+                        0, -2, 1
+                )
+        );
+
+        TextView icon = text(
+                "📚", 23, false
+        );
+
+        icon.setGravity(Gravity.CENTER);
+
+        icon.setBackground(
+                rounded(0x33FFFFFF, 15)
+        );
+
+        header.addView(
+                icon,
+                new LinearLayout.LayoutParams(
+                        dp(46), dp(46)
+                )
+        );
+
+        root.addView(header);
+    }
+
+    private void createProjectSelector() {
+
+        LinearLayout wrapper = column();
+
+        wrapper.setPadding(
+                dp(16), dp(16),
+                dp(16), dp(10)
+        );
+
+        LinearLayout card = column();
+
+        card.setPadding(
+                dp(14), dp(12),
+                dp(14), dp(12)
+        );
+
+        CodeBoxTheme.styleCard(card);
+
+        TextView label = text(
+                "АКТИВНЫЙ ПРОЕКТ",
+                11,
+                true
+        );
+
+        label.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        card.addView(label);
+
+        projectSpinner = new Spinner(this);
+
+        LinearLayout.LayoutParams spinnerParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                );
+
+        spinnerParams.topMargin = dp(4);
+
+        card.addView(
+                projectSpinner, spinnerParams
+        );
+
+        wrapper.addView(card);
+        root.addView(wrapper);
+
+        setupProjects();
     }
 
     private void setupProjects() {
@@ -204,6 +387,14 @@ public class CodeLibraryActivity extends Activity {
         File[] files = projectsRoot.listFiles();
 
         if (files != null) {
+            Arrays.sort(
+                    files,
+                    (a, b) -> a.getName()
+                            .compareToIgnoreCase(
+                                    b.getName()
+                            )
+            );
+
             for (File file : files) {
                 if (file.isDirectory()
                         && file.getName().matches(
@@ -254,9 +445,7 @@ public class CodeLibraryActivity extends Activity {
                         ? ""
                         : projects.get(position);
 
-                if (content != null) {
-                    refreshContent();
-                }
+                refreshContent();
             }
 
             @Override
@@ -266,6 +455,125 @@ public class CodeLibraryActivity extends Activity {
         });
     }
 
+    private void createTabs() {
+
+        LinearLayout wrapper =
+                new LinearLayout(this);
+
+        wrapper.setPadding(
+                dp(16), dp(4),
+                dp(16), dp(8)
+        );
+
+        LinearLayout tabs =
+                new LinearLayout(this);
+
+        tabs.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        tabs.setBackground(
+                rounded(
+                        CodeBoxTheme.surface(this),
+                        16
+                )
+        );
+
+        snippetsTab = text(
+                "📄 Шаблоны",
+                14,
+                true
+        );
+
+        gradleTab = text(
+                "📦 Gradle",
+                14,
+                true
+        );
+
+        snippetsTab.setGravity(Gravity.CENTER);
+        gradleTab.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams tabParams1 =
+                new LinearLayout.LayoutParams(
+                        0, dp(46), 1
+                );
+
+        LinearLayout.LayoutParams tabParams2 =
+                new LinearLayout.LayoutParams(
+                        0, dp(46), 1
+                );
+
+        tabs.addView(snippetsTab, tabParams1);
+        tabs.addView(gradleTab, tabParams2);
+
+        wrapper.addView(
+                tabs,
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                )
+        );
+
+        root.addView(wrapper);
+
+        snippetsTab.setOnClickListener(v -> {
+            showingGradle = false;
+            refreshContent();
+        });
+
+        gradleTab.setOnClickListener(v -> {
+            showingGradle = true;
+            refreshContent();
+        });
+
+        updateTabs();
+    }
+
+    private void updateTabs() {
+
+        if (snippetsTab == null
+                || gradleTab == null) {
+            return;
+        }
+
+        int inactiveText =
+                CodeBoxTheme.secondaryText(this);
+
+        snippetsTab.setBackground(
+                showingGradle
+                        ? rounded(
+                                Color.TRANSPARENT, 12
+                        )
+                        : rounded(
+                                CodeBoxTheme.PURPLE, 12
+                        )
+        );
+
+        gradleTab.setBackground(
+                showingGradle
+                        ? rounded(
+                                CodeBoxTheme.PURPLE, 12
+                        )
+                        : rounded(
+                                Color.TRANSPARENT, 12
+                        )
+        );
+
+        snippetsTab.setTextColor(
+                showingGradle
+                        ? inactiveText
+                        : Color.WHITE
+        );
+
+        gradleTab.setTextColor(
+                showingGradle
+                        ? Color.WHITE
+                        : inactiveText
+        );
+    }
+
     private void refreshContent() {
 
         if (content == null) {
@@ -273,6 +581,7 @@ public class CodeLibraryActivity extends Activity {
         }
 
         content.removeAllViews();
+        updateTabs();
 
         if (showingGradle) {
             showDependencies();
@@ -281,36 +590,114 @@ public class CodeLibraryActivity extends Activity {
         }
     }
 
-    private TextView createLabel(String text) {
+    private void sectionHeading(
+            String heading,
+            String description) {
 
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextSize(15);
-        label.setTextColor(0xFF222233);
-        label.setPadding(
-                dp(8), dp(10),
-                dp(8), dp(10)
+        TextView title = text(
+                heading, 19, true
         );
 
-        return label;
+        content.addView(title);
+
+        TextView subtitle = text(
+                description, 12, false
+        );
+
+        subtitle.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                );
+
+        params.topMargin = dp(5);
+        params.bottomMargin = dp(16);
+
+        content.addView(subtitle, params);
     }
 
-    private Button createButton(String text) {
+    private void showEmpty(
+            String symbol,
+            String heading,
+            String description) {
 
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
+        LinearLayout card = column();
 
-        return button;
+        card.setGravity(Gravity.CENTER);
+
+        card.setPadding(
+                dp(18), dp(34),
+                dp(18), dp(34)
+        );
+
+        TextView icon = text(
+                symbol, 40, false
+        );
+
+        icon.setGravity(Gravity.CENTER);
+        card.addView(icon);
+
+        TextView title = text(
+                heading, 17, true
+        );
+
+        title.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams titleParams =
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                );
+
+        titleParams.topMargin = dp(12);
+
+        card.addView(title, titleParams);
+
+        TextView subtitle = text(
+                description, 13, false
+        );
+
+        subtitle.setGravity(Gravity.CENTER);
+
+        subtitle.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        LinearLayout.LayoutParams subParams =
+                new LinearLayout.LayoutParams(
+                        -1, -2
+                );
+
+        subParams.topMargin = dp(8);
+
+        card.addView(subtitle, subParams);
+
+        addCard(content, card);
     }
 
     private void showSnippets() {
 
-        Button addButton = createButton(
-                "+ Добавить шаблон"
+        sectionHeading(
+                "Мои шаблоны",
+                "Сохраняй фрагменты Java и XML "
+                        + "для повторного использования"
         );
 
-        content.addView(addButton);
+        TextView addButton = actionButton(
+                "＋ Добавить шаблон",
+                CodeBoxTheme.PURPLE
+        );
+
+        LinearLayout.LayoutParams addParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                );
+
+        addParams.bottomMargin = dp(16);
+
+        content.addView(addButton, addParams);
 
         addButton.setOnClickListener(
                 v -> showAddSnippetDialog()
@@ -321,10 +708,10 @@ public class CodeLibraryActivity extends Activity {
                     manager.getSnippets(selectedProject);
 
             if (snippets.isEmpty()) {
-                content.addView(
-                        createLabel(
-                                "Шаблонов пока нет"
-                        )
+                showEmpty(
+                        "📄",
+                        "Шаблонов пока нет",
+                        "Добавь первый Java или XML шаблон"
                 );
                 return;
             }
@@ -332,64 +719,160 @@ public class CodeLibraryActivity extends Activity {
             for (CodeLibraryManager.Snippet snippet
                     : snippets) {
 
-                LinearLayout item =
+                LinearLayout card = column();
+
+                card.setPadding(
+                        dp(16), dp(16),
+                        dp(16), dp(16)
+                );
+
+                LinearLayout heading =
                         new LinearLayout(this);
 
-                item.setOrientation(
-                        LinearLayout.VERTICAL
-                );
-                item.setPadding(
-                        dp(12), dp(10),
-                        dp(12), dp(10)
-                );
-                item.setBackgroundColor(Color.WHITE);
-
-                TextView name = createLabel(
-                        snippet.title + "  [" +
-                                snippet.language + "]"
+                heading.setOrientation(
+                        LinearLayout.HORIZONTAL
                 );
 
-                name.setTypeface(
-                        Typeface.DEFAULT,
-                        Typeface.BOLD
+                heading.setGravity(
+                        Gravity.CENTER_VERTICAL
                 );
 
-                item.addView(name);
+                TextView symbol = text(
+                        "java".equalsIgnoreCase(
+                                snippet.language
+                        ) ? "J" : "</>",
+                        17,
+                        true
+                );
 
-                TextView owner = createLabel(
+                symbol.setGravity(Gravity.CENTER);
+
+                symbol.setTextColor(
+                        "java".equalsIgnoreCase(
+                                snippet.language
+                        )
+                                ? 0xFFDF7544
+                                : CodeBoxTheme.BLUE
+                );
+
+                symbol.setBackground(
+                        rounded(
+                                CodeBoxTheme.isDark(this)
+                                        ? 0xFF302B3E
+                                        : 0xFFF2EEFA,
+                                12
+                        )
+                );
+
+                heading.addView(
+                        symbol,
+                        new LinearLayout.LayoutParams(
+                                dp(46), dp(46)
+                        )
+                );
+
+                LinearLayout labels = column();
+
+                labels.setPadding(
+                        dp(12), 0, 0, 0
+                );
+
+                TextView name = text(
+                        snippet.title, 16, true
+                );
+
+                name.setMaxLines(2);
+                labels.addView(name);
+
+                TextView owner = text(
                         snippet.projectName.isEmpty()
-                                ? "Доступен всем проектам"
-                                : "Проект: " +
-                                        snippet.projectName
+                                ? "Общий шаблон"
+                                : "Проект: "
+                                        + snippet.projectName,
+                        12,
+                        false
                 );
 
-                owner.setTextSize(12);
-                owner.setTextColor(0xFF777788);
-
-                item.addView(owner);
-
-                TextView preview = createLabel(
-                        snippet.code
+                owner.setTextColor(
+                        CodeBoxTheme.secondaryText(this)
                 );
 
-                preview.setTypeface(
-                        Typeface.MONOSPACE
+                labels.addView(owner);
+
+                heading.addView(
+                        labels,
+                        new LinearLayout.LayoutParams(
+                                0, -2, 1
+                        )
                 );
-                preview.setTextSize(12);
+
+                card.addView(heading);
+
+                TextView preview = text(
+                        snippet.code, 12, false
+                );
+
+                preview.setTypeface(Typeface.MONOSPACE);
                 preview.setMaxLines(5);
-
-                item.addView(preview);
-
-                Button viewButton = createButton(
-                        "Посмотреть код"
+                preview.setEllipsize(
+                        TextUtils.TruncateAt.END
                 );
 
-                Button deleteButton = createButton(
-                        "Удалить"
+                preview.setPadding(
+                        dp(12), dp(12),
+                        dp(12), dp(12)
                 );
 
-                item.addView(viewButton);
-                item.addView(deleteButton);
+                preview.setBackground(
+                        rounded(
+                                CodeBoxTheme.isDark(this)
+                                        ? 0xFF20222C
+                                        : 0xFFF4F5F9,
+                                12
+                        )
+                );
+
+                LinearLayout.LayoutParams previewParams =
+                        new LinearLayout.LayoutParams(
+                                -1, -2
+                        );
+
+                previewParams.topMargin = dp(14);
+                previewParams.bottomMargin = dp(12);
+
+                card.addView(preview, previewParams);
+
+                LinearLayout actions =
+                        new LinearLayout(this);
+
+                actions.setOrientation(
+                        LinearLayout.HORIZONTAL
+                );
+
+                TextView viewButton =
+                        secondaryButton("Посмотреть");
+
+                TextView deleteButton =
+                        secondaryButton("Удалить");
+
+                LinearLayout.LayoutParams left =
+                        new LinearLayout.LayoutParams(
+                                0, dp(44), 1
+                        );
+
+                left.rightMargin = dp(8);
+
+                actions.addView(viewButton, left);
+
+                actions.addView(
+                        deleteButton,
+                        new LinearLayout.LayoutParams(
+                                0, dp(44), 1
+                        )
+                );
+
+                card.addView(actions);
+                addCard(content, card);
 
                 viewButton.setOnClickListener(
                         v -> new AlertDialog.Builder(this)
@@ -404,15 +887,6 @@ public class CodeLibraryActivity extends Activity {
                 deleteButton.setOnClickListener(
                         v -> confirmDeleteSnippet(snippet)
                 );
-
-                LinearLayout.LayoutParams params =
-                        new LinearLayout.LayoutParams(
-                                -1, -2
-                        );
-
-                params.bottomMargin = dp(12);
-
-                content.addView(item, params);
             }
 
         } catch (IOException e) {
@@ -422,8 +896,8 @@ public class CodeLibraryActivity extends Activity {
 
     private void showAddSnippetDialog() {
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout layout = column();
+
         layout.setPadding(
                 dp(20), dp(10),
                 dp(20), dp(4)
@@ -436,9 +910,7 @@ public class CodeLibraryActivity extends Activity {
 
         Spinner language = new Spinner(this);
 
-        String[] languages = {
-                "java", "xml"
-        };
+        String[] languages = {"java", "xml"};
 
         ArrayAdapter<String> adapter =
                 new ArrayAdapter<>(
@@ -456,6 +928,7 @@ public class CodeLibraryActivity extends Activity {
         layout.addView(language);
 
         EditText code = new EditText(this);
+
         code.setHint("Вставь код шаблона");
         code.setMinLines(5);
         code.setGravity(Gravity.TOP);
@@ -469,31 +942,42 @@ public class CodeLibraryActivity extends Activity {
 
         layout.addView(code);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Новый шаблон")
-                .setView(layout)
-                .setPositiveButton(
-                        "Сохранить",
-                        (dialog, which) -> {
-                            try {
-                                manager.addSnippet(
-                                        name.getText().toString(),
-                                        language
-                                                .getSelectedItem()
-                                                .toString(),
-                                        code.getText().toString(),
-                                        selectedProject
-                                );
+        AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                        .setTitle("Новый шаблон")
+                        .setView(layout)
+                        .setPositiveButton(
+                                "Сохранить", null
+                        )
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
+                        .create();
 
-                                refreshContent();
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(
+                        AlertDialog.BUTTON_POSITIVE
+                ).setOnClickListener(v -> {
+                    try {
+                        manager.addSnippet(
+                                name.getText().toString(),
+                                language
+                                        .getSelectedItem()
+                                        .toString(),
+                                code.getText().toString(),
+                                selectedProject
+                        );
 
-                            } catch (IOException e) {
-                                showToast(e.getMessage());
-                            }
-                        }
-                )
-                .setNegativeButton("Отмена", null)
-                .show();
+                        dialog.dismiss();
+                        refreshContent();
+
+                    } catch (IOException e) {
+                        showToast(e.getMessage());
+                    }
+                })
+        );
+
+        dialog.show();
     }
 
     private void confirmDeleteSnippet(
@@ -523,56 +1007,105 @@ public class CodeLibraryActivity extends Activity {
 
     private void showDependencies() {
 
+        sectionHeading(
+                "Gradle-библиотеки",
+                "Управление зависимостями "
+                        + "Android-проекта"
+        );
+
         if (selectedProject.isEmpty()) {
-            content.addView(
-                    createLabel(
-                            "Выбери проект, чтобы управлять " +
-                                    "его Gradle-библиотеками"
-                    )
+            showEmpty(
+                    "📦",
+                    "Проект не выбран",
+                    "Выбери конкретный проект "
+                            + "в списке выше"
             );
             return;
         }
 
-        content.addView(
-                createLabel(
-                        "Проект: " + selectedProject
+        LinearLayout tools = column();
+
+        tools.setPadding(
+                dp(14), dp(16),
+                dp(14), dp(16)
+        );
+
+        TextView project = text(
+                "Проект: " + selectedProject,
+                15,
+                true
+        );
+
+        tools.addView(project);
+
+        addSpacing(tools, 12);
+
+        TextView createGradleButton = actionButton(
+                "🛠 Создать Gradle-структуру",
+                CodeBoxTheme.BLUE
+        );
+
+        tools.addView(
+                createGradleButton,
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
                 )
         );
 
-        Button createGradleButton = createButton(
-                "🛠 Создать Gradle-структуру"
+        addSpacing(tools, 10);
+
+        TextView applyButton = actionButton(
+                "✓ Применить зависимости",
+                CodeBoxTheme.PURPLE
         );
 
-        content.addView(createGradleButton);
+        tools.addView(
+                applyButton,
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                )
+        );
+
+        addSpacing(tools, 12);
+
+        TextView hint = text(
+                "Gradle-файлы создаются только при "
+                        + "их отсутствии. Применение "
+                        + "добавляет зависимости в "
+                        + "app/build.gradle.",
+                12,
+                false
+        );
+
+        hint.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        tools.addView(hint);
+
+        addCard(content, tools);
 
         createGradleButton.setOnClickListener(
                 v -> confirmCreateGradle()
         );
 
-        Button applyButton = createButton(
-                "✅ Применить зависимости"
-        );
-
-        content.addView(applyButton);
-
         applyButton.setOnClickListener(
                 v -> confirmApplyDependencies()
         );
 
-        content.addView(
-                createLabel(
-                        "Gradle-файлы создаются только "
-                                + "при их отсутствии. "
-                                + "Применение добавляет "
-                                + "зависимости в app/build.gradle."
-                )
+        TextView addButton = actionButton(
+                "＋ Добавить Gradle-библиотеку",
+                CodeBoxTheme.PURPLE
         );
 
-        Button addButton = createButton(
-                "+ Добавить Gradle-библиотеку"
-        );
+        LinearLayout.LayoutParams addParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(48)
+                );
 
-        content.addView(addButton);
+        addParams.bottomMargin = dp(16);
+
+        content.addView(addButton, addParams);
 
         addButton.setOnClickListener(
                 v -> showAddDependencyDialog()
@@ -585,54 +1118,72 @@ public class CodeLibraryActivity extends Activity {
                     );
 
             if (dependencies.isEmpty()) {
-                content.addView(
-                        createLabel(
-                                "Зависимостей пока нет"
-                        )
+                showEmpty(
+                        "📦",
+                        "Зависимостей пока нет",
+                        "Добавь библиотеку в формате "
+                                + "group:artifact:version"
                 );
                 return;
             }
 
             for (String dependency : dependencies) {
 
-                LinearLayout item =
-                        new LinearLayout(this);
+                LinearLayout card = column();
 
-                item.setOrientation(
-                        LinearLayout.VERTICAL
+                card.setPadding(
+                        dp(16), dp(14),
+                        dp(16), dp(14)
                 );
-                item.setPadding(
-                        dp(10), dp(10),
-                        dp(10), dp(10)
-                );
-                item.setBackgroundColor(Color.WHITE);
 
-                TextView name = createLabel(dependency);
+                TextView label = text(
+                        "GRADLE DEPENDENCY",
+                        11,
+                        true
+                );
+
+                label.setTextColor(
+                        CodeBoxTheme.secondaryText(this)
+                );
+
+                card.addView(label);
+
+                TextView name = text(
+                        dependency, 13, true
+                );
+
                 name.setTypeface(Typeface.MONOSPACE);
                 name.setTextIsSelectable(true);
 
-                item.addView(name);
+                LinearLayout.LayoutParams nameParams =
+                        new LinearLayout.LayoutParams(
+                                -1, -2
+                        );
 
-                Button deleteButton = createButton(
-                        "Удалить зависимость"
+                nameParams.topMargin = dp(8);
+                nameParams.bottomMargin = dp(12);
+
+                card.addView(name, nameParams);
+
+                TextView deleteButton =
+                        secondaryButton(
+                                "Удалить из библиотеки"
+                        );
+
+                card.addView(
+                        deleteButton,
+                        new LinearLayout.LayoutParams(
+                                -1, dp(44)
+                        )
                 );
 
-                item.addView(deleteButton);
+                addCard(content, card);
 
                 deleteButton.setOnClickListener(
                         v -> confirmDeleteDependency(
                                 dependency
                         )
                 );
-
-                LinearLayout.LayoutParams params =
-                        new LinearLayout.LayoutParams(
-                                -1, -2
-                        );
-
-                params.bottomMargin = dp(10);
-
-                content.addView(item, params);
             }
 
         } catch (IOException e) {
@@ -707,9 +1258,7 @@ public class CodeLibraryActivity extends Activity {
         }
 
         if (dependencies.isEmpty()) {
-            showToast(
-                    "Сначала добавь зависимости"
-            );
+            showToast("Сначала добавь зависимости");
             return;
         }
 
@@ -771,39 +1320,58 @@ public class CodeLibraryActivity extends Activity {
 
         EditText input = new EditText(this);
 
-        input.setHint(
-                "group:artifact:version"
-        );
-
+        input.setHint("group:artifact:version");
         input.setSingleLine(true);
         input.setTypeface(Typeface.MONOSPACE);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Добавить Gradle-библиотеку")
-                .setMessage(
-                        "Проект: " + projectName
-                )
-                .setView(input)
-                .setPositiveButton(
-                        "Добавить",
-                        (dialog, which) -> {
-                            try {
-                                manager.addDependency(
-                                        projectName,
-                                        input.getText()
-                                                .toString()
-                                                .trim()
-                                );
+        LinearLayout wrapper = column();
 
-                                refreshContent();
+        wrapper.setPadding(
+                dp(20), dp(8),
+                dp(20), dp(4)
+        );
 
-                            } catch (IOException e) {
-                                showToast(e.getMessage());
-                            }
-                        }
-                )
-                .setNegativeButton("Отмена", null)
-                .show();
+        wrapper.addView(input);
+
+        AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                        .setTitle(
+                                "Добавить Gradle-библиотеку"
+                        )
+                        .setMessage(
+                                "Проект: " + projectName
+                        )
+                        .setView(wrapper)
+                        .setPositiveButton(
+                                "Добавить", null
+                        )
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
+                        .create();
+
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(
+                        AlertDialog.BUTTON_POSITIVE
+                ).setOnClickListener(v -> {
+                    try {
+                        manager.addDependency(
+                                projectName,
+                                input.getText()
+                                        .toString()
+                                        .trim()
+                        );
+
+                        dialog.dismiss();
+                        refreshContent();
+
+                    } catch (IOException e) {
+                        showToast(e.getMessage());
+                    }
+                })
+        );
+
+        dialog.show();
     }
 
     private void confirmDeleteDependency(
@@ -851,7 +1419,11 @@ public class CodeLibraryActivity extends Activity {
     private void showError(String message) {
         new AlertDialog.Builder(this)
                 .setTitle("Ошибка библиотеки")
-                .setMessage(message)
+                .setMessage(
+                        message == null
+                                ? "Неизвестная ошибка"
+                                : message
+                )
                 .setPositiveButton(
                         "Закрыть",
                         (dialog, which) -> finish()

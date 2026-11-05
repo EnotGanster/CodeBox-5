@@ -27,7 +27,8 @@ android {
 }
 
 dependencies {
-    // Eclipse Compiler for Java.
-    // Включается в APK CodeBox 5 при сборке через Gradle.
-    implementation 'org.eclipse.jdt:ecj:3.40.0'
+    // Experimental older Eclipse Java compiler.
+    // ECJ 3.18.0 corresponds to Eclipse 4.12.
+    // Android 12 runtime compatibility is not guaranteed.
+    implementation 'org.eclipse.jdt:ecj:3.18.0'
 }

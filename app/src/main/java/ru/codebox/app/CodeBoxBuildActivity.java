@@ -28,12 +28,17 @@ import java.util.Locale;
 
 /**
  * CodeBox 5 build screen.
- * Runs ECJ diagnostics in a background thread.
+ *
+ * Runs ECJ in a background thread.
+ * Supports importing a standalone Android SDK android.jar.
+ * Supports verified toolchain ZIP installation.
+ *
  * APK/AAB packaging is not implemented yet.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
     private static final int PICK_TOOLCHAIN_ZIP = 7124;
+    private static final int PICK_ANDROID_JAR = 7125;
 
     private CodeBoxBuildManager manager;
     private String projectName;
@@ -126,14 +131,32 @@ public final class CodeBoxBuildActivity extends Activity {
                 false
         );
 
+        TextView androidJarButton = actionButton(
+                "Установить android.jar",
+                Color.rgb(47, 121, 113)
+        );
+
+        LinearLayout.LayoutParams jarParams =
+                new LinearLayout.LayoutParams(-1, dp(44));
+        jarParams.topMargin = dp(10);
+        root.addView(androidJarButton, jarParams);
+
+        androidJarButton.setOnClickListener(v -> {
+            if (installing) {
+                toast("Дождитесь завершения текущей операции");
+            } else {
+                requestAndroidJar();
+            }
+        });
+
         TextView install = actionButton(
                 "Установить инструменты из ZIP",
-                Color.rgb(47, 121, 113)
+                Color.rgb(47, 93, 121)
         );
 
         LinearLayout.LayoutParams installParams =
                 new LinearLayout.LayoutParams(-1, dp(44));
-        installParams.topMargin = dp(10);
+        installParams.topMargin = dp(8);
         root.addView(install, installParams);
 
         install.setOnClickListener(v -> {
@@ -375,6 +398,104 @@ public final class CodeBoxBuildActivity extends Activity {
         }, "CodeBoxEcjBuild").start();
     }
 
+    private void requestAndroidJar() {
+        if (installing) return;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Установка Android API")
+                .setMessage(
+                        "Выберите настоящий android.jar из Android SDK, "
+                        + "например platforms/android-35/android.jar. "
+                        + "CodeBox проверит структуру JAR, основные "
+                        + "классы Android и рассчитает SHA-256. "
+                        + "Это не подтверждает подлинность файла. "
+                        + "Используйте только доверенный Android SDK."
+                )
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Выбрать android.jar", (d, w) -> {
+                    Intent intent =
+                            new Intent(Intent.ACTION_OPEN_DOCUMENT);
+
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+
+                    intent.putExtra(
+                            Intent.EXTRA_MIME_TYPES,
+                            new String[]{
+                                    "application/java-archive",
+                                    "application/zip",
+                                    "application/octet-stream"
+                            }
+                    );
+
+                    try {
+                        startActivityForResult(
+                                intent,
+                                PICK_ANDROID_JAR
+                        );
+                    } catch (Exception e) {
+                        toast(
+                                "Не удалось открыть выбор файла: "
+                                + e.getMessage()
+                        );
+                    }
+                })
+                .show();
+    }
+
+    private void installAndroidJar(Uri uri) {
+        if (installing) return;
+
+        installing = true;
+        installationReport = null;
+
+        statusView.setText(
+                "Статус: установка android.jar..."
+        );
+        reportView.setText(
+                "Проверяем Android API и копируем файл. Подождите..."
+        );
+
+        new Thread(() -> {
+            String result;
+
+            try (InputStream stream =
+                         getContentResolver().openInputStream(uri)) {
+
+                if (stream == null) {
+                    throw new IOException(
+                            "Не удалось открыть android.jar"
+                    );
+                }
+
+                CodeBoxAndroidJarInstaller.Result installed =
+                        CodeBoxAndroidJarInstaller.install(
+                                getApplicationContext(),
+                                stream
+                        );
+
+                result = installed.report;
+
+            } catch (Exception e) {
+                result =
+                        "CodeBox 5 — установка Android API\n"
+                        + "Статус: FAILED\n"
+                        + "Ошибка: " + e + "\n"
+                        + "Установка не завершена. "
+                        + "Проверьте выбранный файл.";
+            }
+
+            final String report = result;
+
+            runOnUiThread(() -> {
+                installing = false;
+                installationReport = report;
+                refreshReport();
+            });
+
+        }, "CodeBoxAndroidJarInstall").start();
+    }
+
     private void requestInstall() {
         if (installing) return;
 
@@ -435,14 +556,27 @@ public final class CodeBoxBuildActivity extends Activity {
                 requestCode, resultCode, data
         );
 
-        if (requestCode != PICK_TOOLCHAIN_ZIP
-                || resultCode != RESULT_OK
+        if (resultCode != RESULT_OK
                 || data == null
                 || data.getData() == null) {
             return;
         }
 
+        if (installing) {
+            toast("Дождитесь завершения текущей операции");
+            return;
+        }
+
         final Uri uri = data.getData();
+
+        if (requestCode == PICK_ANDROID_JAR) {
+            installAndroidJar(uri);
+            return;
+        }
+
+        if (requestCode != PICK_TOOLCHAIN_ZIP) {
+            return;
+        }
 
         EditText hash = new EditText(this);
         hash.setSingleLine(true);
@@ -489,6 +623,7 @@ public final class CodeBoxBuildActivity extends Activity {
         if (installing) return;
 
         installing = true;
+        installationReport = null;
 
         statusView.setText(
                 "Статус: установка инструментов..."
@@ -558,11 +693,13 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         if (installationReport != null) {
+            boolean failed =
+                    installationReport.contains("Статус: FAILED");
+
             statusView.setText(
-                    installationReport.contains("Статус: FAILED")
+                    failed
                     ? "Установка: ошибка"
-                    : "Установка: файлы распакованы "
-                      + "(запуск не проверен)"
+                    : "Установка: завершена (совместимость не проверена)"
             );
 
             reportView.setText(installationReport);
@@ -582,9 +719,9 @@ public final class CodeBoxBuildActivity extends Activity {
 
         reportView.setText(
                 state == CodeBoxBuildManager.State.IDLE
-                ? "Выберите APK или AAB для диагностики. "
-                  + "Для установки инструментов нужен "
-                  + "доверенный ZIP и отдельный SHA-256."
+                ? "Выберите APK или AAB для запуска ECJ. "
+                  + "Если Android API отсутствует, "
+                  + "установите доверенный android.jar."
                 : manager.getReport()
         );
     }
@@ -604,6 +741,11 @@ public final class CodeBoxBuildActivity extends Activity {
     }
 
     private void saveLog() {
+        if (installing) {
+            toast("Дождитесь завершения текущей операции");
+            return;
+        }
+
         String report = currentReport();
 
         if (report == null) {
@@ -673,6 +815,11 @@ public final class CodeBoxBuildActivity extends Activity {
     }
 
     private void shareLog() {
+        if (installing) {
+            toast("Дождитесь завершения текущей операции");
+            return;
+        }
+
         String report = currentReport();
 
         if (report == null) {

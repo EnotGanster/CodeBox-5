@@ -193,25 +193,7 @@ public final class ProjectScreen {
         pathCard.addView(info, infoParams);
         parent.addView(pathCard);
 
-        TextView library = text("📚 Библиотека кода и Gradle", 12, true);
-        library.setGravity(Gravity.CENTER);
-        library.setSingleLine(true);
-        library.setEllipsize(TextUtils.TruncateAt.END);
-        CodeBoxTheme.styleColoredButton(library, CodeBoxTheme.PURPLE);
-        LinearLayout.LayoutParams libParams = new LinearLayout.LayoutParams(-1, dp(40));
-        libParams.topMargin = dp(9);
-        parent.addView(library, libParams);
-        library.setOnClickListener(v -> openCodeLibrary());
 
-        TextView check = text("🔨 Проверить проект", 12, true);
-        check.setGravity(Gravity.CENTER);
-        check.setSingleLine(true);
-        CodeBoxTheme.styleColoredButton(check, CodeBoxTheme.BLUE);
-        LinearLayout.LayoutParams checkParams = new LinearLayout.LayoutParams(-1, dp(40));
-        checkParams.topMargin = dp(7);
-        checkParams.bottomMargin = dp(12);
-        parent.addView(check, checkParams);
-        check.setOnClickListener(v -> checkProject());
     }
 
     private void openCodeLibrary() {
@@ -371,4 +353,4 @@ public final class ProjectScreen {
             return true;
         });
     }
-            }
+}

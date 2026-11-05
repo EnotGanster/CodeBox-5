@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -16,6 +18,18 @@ import java.util.regex.Pattern;
 public final class GradleProjectManager {
 
     private final File projectsRoot;
+
+    private static final Pattern COORDINATE =
+            Pattern.compile(
+                    "[A-Za-z0-9_.-]+:"
+                    + "[A-Za-z0-9_.-]+:"
+                    + "[A-Za-z0-9_.+\\-]+"
+            );
+
+    private static final Pattern DEPENDENCIES_BLOCK =
+            Pattern.compile(
+                    "(?m)^[ \\t]*dependencies[ \\t]*\\{"
+            );
 
     public GradleProjectManager(Context context)
             throws IOException {
@@ -26,7 +40,7 @@ public final class GradleProjectManager {
         ).getCanonicalFile();
     }
 
-    private File project(String name)
+    private File getProject(String name)
             throws IOException {
 
         if (name == null ||
@@ -34,7 +48,7 @@ public final class GradleProjectManager {
                         "[A-Za-z][A-Za-z0-9_]{0,49}"
                 )) {
             throw new IOException(
-                    "Некорректное название проекта"
+                    "Некорректное имя проекта"
             );
         }
 
@@ -45,16 +59,15 @@ public final class GradleProjectManager {
         if (!projectsRoot.equals(
                 dir.getParentFile()
         ) || !dir.isDirectory()) {
-
             throw new IOException(
-                    "Проект не найден"
+                    "Проект не найден: " + name
             );
         }
 
         return dir;
     }
 
-    private File child(
+    private File getChild(
             File project,
             String relative)
             throws IOException {
@@ -67,7 +80,7 @@ public final class GradleProjectManager {
                 project.getPath() + File.separator
         )) {
             throw new IOException(
-                    "Путь выходит за пределы проекта"
+                    "Недопустимый путь"
             );
         }
 
@@ -82,8 +95,8 @@ public final class GradleProjectManager {
         if (file.exists()) {
             if (!file.isFile()) {
                 throw new IOException(
-                        "Путь занят папкой: "
-                                + file.getName()
+                        "Ожидался файл: "
+                        + file.getName()
                 );
             }
             return;
@@ -93,10 +106,8 @@ public final class GradleProjectManager {
 
         if (!parent.isDirectory()
                 && !parent.mkdirs()) {
-
             throw new IOException(
-                    "Не удалось создать папку: "
-                            + parent.getName()
+                    "Не удалось создать папку"
             );
         }
 
@@ -105,8 +116,8 @@ public final class GradleProjectManager {
                 text.getBytes(
                         StandardCharsets.UTF_8
                 ),
-                java.nio.file.StandardOpenOption.CREATE_NEW,
-                java.nio.file.StandardOpenOption.WRITE
+                StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE
         );
     }
 
@@ -114,114 +125,110 @@ public final class GradleProjectManager {
             String name)
             throws IOException {
 
-        File dir = project(name);
+        File project = getProject(name);
 
-        String namespace =
-                "ru.codebox.projects."
-                        + name.toLowerCase(Locale.ROOT);
+        String packageName =
+                "com.example."
+                + name.toLowerCase(Locale.ROOT);
 
         createIfAbsent(
-                child(dir, "settings.gradle"),
+                getChild(project, "settings.gradle"),
                 "pluginManagement {\n"
-                        + "    repositories {\n"
-                        + "        google()\n"
-                        + "        mavenCentral()\n"
-                        + "        gradlePluginPortal()\n"
-                        + "    }\n"
-                        + "}\n\n"
-                        + "dependencyResolutionManagement {\n"
-                        + "    repositoriesMode.set("
-                        + "RepositoriesMode.FAIL_ON_PROJECT_REPOS"
-                        + ")\n"
-                        + "    repositories {\n"
-                        + "        google()\n"
-                        + "        mavenCentral()\n"
-                        + "    }\n"
-                        + "}\n\n"
-                        + "rootProject.name = '"
-                        + name + "'\n"
-                        + "include ':app'\n"
+                + "    repositories {\n"
+                + "        google()\n"
+                + "        mavenCentral()\n"
+                + "        gradlePluginPortal()\n"
+                + "    }\n"
+                + "}\n\n"
+                + "dependencyResolutionManagement {\n"
+                + "    repositoriesMode.set("
+                + "RepositoriesMode.FAIL_ON_PROJECT_REPOS"
+                + ")\n"
+                + "    repositories {\n"
+                + "        google()\n"
+                + "        mavenCentral()\n"
+                + "    }\n"
+                + "}\n\n"
+                + "rootProject.name = '" + name + "'\n"
+                + "include ':app'\n"
         );
 
         createIfAbsent(
-                child(dir, "build.gradle"),
+                getChild(project, "build.gradle"),
                 "plugins {\n"
-                        + "    id 'com.android.application' "
-                        + "version '8.7.3' apply false\n"
-                        + "}\n"
+                + "    id 'com.android.application' "
+                + "version '8.7.3' apply false\n"
+                + "}\n"
         );
 
         createIfAbsent(
-                child(dir, "gradle.properties"),
+                getChild(project, "gradle.properties"),
                 "org.gradle.jvmargs=-Xmx2048m "
-                        + "-Dfile.encoding=UTF-8\n"
-                        + "android.useAndroidX=true\n"
+                + "-Dfile.encoding=UTF-8\n"
+                + "android.useAndroidX=true\n"
         );
 
         createIfAbsent(
-                child(dir, "app/build.gradle"),
+                getChild(project, "app/build.gradle"),
                 "plugins {\n"
-                        + "    id 'com.android.application'\n"
-                        + "}\n\n"
-                        + "android {\n"
-                        + "    namespace '"
-                        + namespace + "'\n"
-                        + "    compileSdk 35\n\n"
-                        + "    defaultConfig {\n"
-                        + "        applicationId '"
-                        + namespace + "'\n"
-                        + "        minSdk 26\n"
-                        + "        targetSdk 28\n"
-                        + "        versionCode 1\n"
-                        + "        versionName '1.0'\n"
-                        + "    }\n"
-                        + "    compileOptions {\n"
-                        + "        sourceCompatibility "
-                        + "JavaVersion.VERSION_17\n"
-                        + "        targetCompatibility "
-                        + "JavaVersion.VERSION_17\n"
-                        + "    }\n"
-                        + "}\n\n"
-                        + "dependencies {\n"
-                        + "}\n"
+                + "    id 'com.android.application'\n"
+                + "}\n\n"
+                + "android {\n"
+                + "    namespace '" + packageName + "'\n"
+                + "    compileSdk 35\n\n"
+                + "    defaultConfig {\n"
+                + "        applicationId '" + packageName
+                + "'\n"
+                + "        minSdk 26\n"
+                + "        targetSdk 28\n"
+                + "        versionCode 1\n"
+                + "        versionName '1.0'\n"
+                + "    }\n\n"
+                + "    compileOptions {\n"
+                + "        sourceCompatibility "
+                + "JavaVersion.VERSION_17\n"
+                + "        targetCompatibility "
+                + "JavaVersion.VERSION_17\n"
+                + "    }\n"
+                + "}\n\n"
+                + "dependencies {\n"
+                + "}\n"
         );
 
         createIfAbsent(
-                child(
-                        dir,
+                getChild(
+                        project,
                         "app/src/main/AndroidManifest.xml"
                 ),
                 "<?xml version=\"1.0\" "
-                        + "encoding=\"utf-8\"?>\n"
-                        + "<manifest xmlns:android="
-                        + "\"http://schemas.android.com/"
-                        + "apk/res/android\">\n"
-                        + "    <application "
-                        + "android:label=\""
-                        + name
-                        + "\" android:theme="
-                        + "\"@android:style/"
-                        + "Theme.Material.Light.NoActionBar\""
-                        + " />\n"
-                        + "</manifest>\n"
+                + "encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android="
+                + "\"http://schemas.android.com/"
+                + "apk/res/android\">\n"
+                + "    <application "
+                + "android:label=\"" + name + "\" "
+                + "android:theme="
+                + "\"@android:style/"
+                + "Theme.Material.Light.NoActionBar\""
+                + " />\n"
+                + "</manifest>\n"
         );
     }
 
     public synchronized int applyDependencies(
-            String name,
+            String projectName,
             List<String> dependencies)
             throws IOException {
 
-        File dir = project(name);
+        File project = getProject(projectName);
 
-        File file = child(
-                dir, "app/build.gradle"
+        File file = getChild(
+                project, "app/build.gradle"
         );
 
         if (!file.isFile()) {
             throw new IOException(
-                    "Нет app/build.gradle. "
-                            + "Сначала создай Gradle-структуру."
+                    "Сначала создай Gradle-структуру"
             );
         }
 
@@ -231,74 +238,210 @@ public final class GradleProjectManager {
             );
         }
 
+        if (dependencies == null) {
+            throw new IOException(
+                    "Список зависимостей отсутствует"
+            );
+        }
+
         String original = new String(
-                Files.readAllBytes(
-                        file.toPath()
-                ),
+                Files.readAllBytes(file.toPath()),
                 StandardCharsets.UTF_8
         );
 
         String result = original;
-        int added = 0;
+        List<String> missing = new ArrayList<>();
 
         for (String coordinate : dependencies) {
 
             if (coordinate == null ||
-                    !coordinate.matches(
-                            "[A-Za-z0-9_.-]+:"
-                                    + "[A-Za-z0-9_.-]+:"
-                                    + "[A-Za-z0-9_.+\\-]+"
-                    )) {
-
+                    !COORDINATE.matcher(
+                            coordinate
+                    ).matches()) {
                 throw new IOException(
-                        "Некорректная зависимость: "
-                                + coordinate
+                        "Неверная зависимость: "
+                        + coordinate
                 );
             }
 
-            Pattern existing = Pattern.compile(
-                    "(?m)^\\s*"
-                            + "(?:implementation|api|"
-                            + "compileOnly|runtimeOnly|"
-                            + "testImplementation|"
-                            + "androidTestImplementation)"
-                            + "\\s*(?:\\(\\s*)?['\"]"
-                            + Pattern.quote(coordinate)
-                            + "['\"]"
-            );
-
-            if (existing.matcher(result).find()) {
+            if (missing.contains(coordinate)
+                    || containsDependency(
+                            result, coordinate
+                    )) {
                 continue;
             }
 
-            int opening =
-                    findDependenciesBlock(result);
-
-            if (opening < 0) {
-                throw new IOException(
-                        "Не найден однозначный блок "
-                                + "dependencies { ... } "
-                                + "в app/build.gradle"
-                );
-            }
-
-            result =
-                    result.substring(0, opening + 1)
-                            + "\n    implementation '"
-                            + coordinate + "'"
-                            + result.substring(opening + 1);
-
-            added++;
+            missing.add(coordinate);
         }
 
-        if (added == 0) {
+        if (missing.isEmpty()) {
             return 0;
         }
 
+        Matcher matcher =
+                DEPENDENCIES_BLOCK.matcher(result);
+
+        int opening = -1;
+
+        while (matcher.find()) {
+            if (opening >= 0) {
+                throw new IOException(
+                        "Найдено несколько блоков "
+                        + "dependencies"
+                );
+            }
+
+            opening = result.indexOf(
+                    '{', matcher.start()
+            );
+        }
+
+        if (opening < 0) {
+
+            if (!bracesBalanced(result)) {
+                throw new IOException(
+                        "Проверь фигурные скобки "
+                        + "в build.gradle"
+                );
+            }
+
+            if (!result.endsWith("\n")) {
+                result += "\n";
+            }
+
+            result += "\ndependencies {\n}\n";
+
+            opening = result.lastIndexOf(
+                    "dependencies {"
+            ) + "dependencies ".length();
+        }
+
+        StringBuilder lines =
+                new StringBuilder();
+
+        for (String coordinate : missing) {
+            lines.append("\n    implementation '")
+                    .append(coordinate)
+                    .append("'");
+        }
+
+        result = result.substring(0, opening + 1)
+                + lines
+                + result.substring(opening + 1);
+
+        saveWithBackup(file, project, result);
+
+        return missing.size();
+    }
+
+    private boolean containsDependency(
+            String text,
+            String coordinate) {
+
+        Pattern pattern = Pattern.compile(
+                "(?m)^\\s*"
+                + "(?:implementation|api|compileOnly|"
+                + "runtimeOnly|testImplementation|"
+                + "androidTestImplementation)"
+                + "\\s*(?:\\(\\s*)?['\"]"
+                + Pattern.quote(coordinate)
+                + "['\"]"
+        );
+
+        return pattern.matcher(text).find();
+    }
+
+    private boolean bracesBalanced(String text) {
+
+        int depth = 0;
+        boolean singleQuote = false;
+        boolean doubleQuote = false;
+        boolean lineComment = false;
+        boolean blockComment = false;
+
+        for (int i = 0; i < text.length(); i++) {
+
+            char c = text.charAt(i);
+            char next = i + 1 < text.length()
+                    ? text.charAt(i + 1)
+                    : '\0';
+
+            if (lineComment) {
+                if (c == '\n') {
+                    lineComment = false;
+                }
+                continue;
+            }
+
+            if (blockComment) {
+                if (c == '*' && next == '/') {
+                    blockComment = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (!singleQuote && !doubleQuote) {
+
+                if (c == '/' && next == '/') {
+                    lineComment = true;
+                    i++;
+                    continue;
+                }
+
+                if (c == '/' && next == '*') {
+                    blockComment = true;
+                    i++;
+                    continue;
+                }
+            }
+
+            if (c == '\\' &&
+                    (singleQuote || doubleQuote)) {
+                i++;
+                continue;
+            }
+
+            if (c == '\'' && !doubleQuote) {
+                singleQuote = !singleQuote;
+                continue;
+            }
+
+            if (c == '"' && !singleQuote) {
+                doubleQuote = !doubleQuote;
+                continue;
+            }
+
+            if (singleQuote || doubleQuote) {
+                continue;
+            }
+
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth < 0) {
+                    return false;
+                }
+            }
+        }
+
+        return depth == 0
+                && !singleQuote
+                && !doubleQuote
+                && !blockComment;
+    }
+
+    private void saveWithBackup(
+            File file,
+            File project,
+            String content)
+            throws IOException {
+
         Path target = file.toPath();
 
-        Path backup = child(
-                dir,
+        Path backup = getChild(
+                project,
                 "app/build.gradle.codebox.bak"
         ).toPath();
 
@@ -315,7 +458,7 @@ public final class GradleProjectManager {
         try {
             Files.write(
                     temp,
-                    result.getBytes(
+                    content.getBytes(
                             StandardCharsets.UTF_8
                     )
             );
@@ -327,7 +470,6 @@ public final class GradleProjectManager {
                         StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING
                 );
-
             } catch (
                     java.nio.file.AtomicMoveNotSupportedException e
             ) {
@@ -341,30 +483,5 @@ public final class GradleProjectManager {
         } finally {
             Files.deleteIfExists(temp);
         }
-
-        return added;
-    }
-
-    private int findDependenciesBlock(
-            String text) {
-
-        Matcher matcher = Pattern.compile(
-                "(?m)^\\s*dependencies\\s*\\{"
-        ).matcher(text);
-
-        int found = -1;
-
-        while (matcher.find()) {
-
-            if (found >= 0) {
-                return -1;
-            }
-
-            found = text.indexOf(
-                    '{', matcher.start()
-            );
-        }
-
-        return found;
     }
 }

@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.app.Activity;
@@ -8,33 +7,122 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RectF;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 public class GraphicsEditorActivity extends Activity {
 
     private static final int IMAGE_SIZE = 1024;
 
+    private static final int PURPLE = 0xFF7650E8;
+    private static final int BLUE = 0xFF487DDE;
+    private static final int RED = 0xFFD94B5B;
+
     private File projectDirectory;
     private File targetDirectory;
 
     private DrawingView drawingView;
+
     private int selectedColor = Color.BLACK;
     private float brushSize = 8f;
+    private boolean eraserMode = false;
+
+    private TextView toolStatus;
+    private LinearLayout paletteLayout;
+
+    private final List<TextView> colorSwatches =
+            new ArrayList<>();
+
+    private final int[] colors = {
+            Color.BLACK,
+            Color.WHITE,
+            Color.RED,
+            Color.rgb(255, 140, 0),
+            Color.YELLOW,
+            Color.GREEN,
+            Color.CYAN,
+            Color.BLUE,
+            Color.MAGENTA,
+            Color.GRAY
+    };
 
     private int dp(float value) {
         return CodeBoxTheme.dp(this, value);
+    }
+
+    private GradientDrawable rounded(
+            int color, int radius) {
+
+        GradientDrawable drawable =
+                new GradientDrawable();
+
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radius));
+
+        return drawable;
+    }
+
+    private GradientDrawable headerGradient() {
+        return new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        0xFF8657F5,
+                        0xFF6535D5,
+                        0xFF4522A3
+                }
+        );
+    }
+
+    private TextView text(
+            String value,
+            int size,
+            boolean bold) {
+
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+
+        view.setTextColor(
+                CodeBoxTheme.textColor(this)
+        );
+
+        if (bold) {
+            view.setTypeface(
+                    android.graphics.Typeface.DEFAULT,
+                    android.graphics.Typeface.BOLD
+            );
+        }
+
+        return view;
+    }
+
+    private TextView button(
+            String value, int color) {
+
+        TextView view = text(value, 13, true);
+        view.setGravity(Gravity.CENTER);
+
+        CodeBoxTheme.styleColoredButton(
+                view, color
+        );
+
+        return view;
     }
 
     @Override
@@ -51,6 +139,7 @@ public class GraphicsEditorActivity extends Activity {
                 !projectName.matches(
                         "[A-Za-z][A-Za-z0-9_]{0,49}"
                 )) {
+
             showError("Неверное имя проекта");
             finish();
             return;
@@ -68,6 +157,7 @@ public class GraphicsEditorActivity extends Activity {
             if (!projectDirectory.getParentFile()
                     .equals(projects)
                     || !projectDirectory.isDirectory()) {
+
                 throw new IOException(
                         "Проект не найден"
                 );
@@ -97,6 +187,7 @@ public class GraphicsEditorActivity extends Activity {
                     && !target.startsWith(
                             root + File.separator
                     )) {
+
                 throw new IOException(
                         "Папка вне проекта"
                 );
@@ -117,75 +208,129 @@ public class GraphicsEditorActivity extends Activity {
         buildScreen();
     }
 
-    private TextView button(
-            String label, int color) {
+    private void buildScreen() {
 
-        TextView view = new TextView(this);
-        view.setText(label);
-        view.setTextSize(14);
-        view.setTextColor(Color.WHITE);
-        view.setGravity(Gravity.CENTER);
+        LinearLayout root =
+                new LinearLayout(this);
 
-        CodeBoxTheme.styleColoredButton(
-                view, color
+        root.setOrientation(
+                LinearLayout.VERTICAL
         );
 
-        return view;
-    }
-
-    private void buildScreen() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(
                 CodeBoxTheme.background(this)
         );
 
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(
-                dp(12), dp(12),
-                dp(12), dp(12)
+        createHeader(root);
+        createCanvasArea(root);
+        createPalette(root);
+        createTools(root);
+
+        setContentView(root);
+        updateToolStatus();
+        updatePaletteSelection();
+    }
+
+    private void createHeader(
+            LinearLayout root) {
+
+        LinearLayout header =
+                new LinearLayout(this);
+
+        header.setOrientation(
+                LinearLayout.HORIZONTAL
         );
 
-        TextView back = button(
-                "‹ Назад",
-                CodeBoxTheme.BLUE
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        header.setPadding(
+                dp(14), dp(14),
+                dp(14), dp(14)
+        );
+
+        header.setBackground(
+                headerGradient()
+        );
+
+        TextView back = text(
+                "‹", 32, true
+        );
+
+        back.setTextColor(Color.WHITE);
+        back.setGravity(Gravity.CENTER);
+
+        back.setBackground(
+                rounded(0x33FFFFFF, 15)
         );
 
         header.addView(
                 back,
                 new LinearLayout.LayoutParams(
-                        0, dp(50), 1
+                        dp(44), dp(44)
                 )
         );
 
-        back.setOnClickListener(v -> finish());
-
-        TextView title = new TextView(this);
-        title.setText("🎨 Редактор");
-        title.setTextSize(20);
-        title.setGravity(Gravity.CENTER);
-        title.setTextColor(
-                CodeBoxTheme.textColor(this)
+        back.setOnClickListener(
+                v -> attemptExit()
         );
+
+        LinearLayout labels =
+                new LinearLayout(this);
+
+        labels.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        labels.setPadding(
+                dp(12), 0,
+                dp(8), 0
+        );
+
+        TextView title = text(
+                "Графический редактор",
+                17,
+                true
+        );
+
+        title.setTextColor(Color.WHITE);
+        title.setSingleLine(true);
+
+        labels.addView(title);
+
+        TextView subtitle = text(
+                "PNG • 1024 × 1024",
+                11,
+                false
+        );
+
+        subtitle.setTextColor(
+                0xFFE8DDFF
+        );
+
+        labels.addView(subtitle);
 
         header.addView(
-                title,
+                labels,
                 new LinearLayout.LayoutParams(
-                        0, dp(50), 2
+                        0, -2, 1
                 )
         );
 
-        TextView save = button(
-                "Сохранить",
-                CodeBoxTheme.GREEN
+        TextView save = text(
+                "✓ PNG", 13, true
+        );
+
+        save.setTextColor(Color.WHITE);
+        save.setGravity(Gravity.CENTER);
+
+        save.setBackground(
+                rounded(0x33FFFFFF, 14)
         );
 
         header.addView(
                 save,
                 new LinearLayout.LayoutParams(
-                        0, dp(50), 2
+                        dp(74), dp(44)
                 )
         );
 
@@ -194,6 +339,69 @@ public class GraphicsEditorActivity extends Activity {
         );
 
         root.addView(header);
+    }
+
+    private void createCanvasArea(
+            LinearLayout root) {
+
+        LinearLayout canvasContainer =
+                new LinearLayout(this);
+
+        canvasContainer.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        canvasContainer.setPadding(
+                dp(12), dp(12),
+                dp(12), dp(8)
+        );
+
+        LinearLayout info =
+                new LinearLayout(this);
+
+        info.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        info.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        TextView label = text(
+                "ХОЛСТ",
+                12,
+                true
+        );
+
+        label.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        info.addView(
+                label,
+                new LinearLayout.LayoutParams(
+                        0, dp(30), 1
+                )
+        );
+
+        label.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        toolStatus = text(
+                "● Кисть",
+                12,
+                true
+        );
+
+        toolStatus.setGravity(
+                Gravity.CENTER_VERTICAL
+                        | Gravity.END
+        );
+
+        info.addView(toolStatus);
+
+        canvasContainer.addView(info);
 
         drawingView = new DrawingView();
 
@@ -202,173 +410,398 @@ public class GraphicsEditorActivity extends Activity {
                         -1, 0, 1
                 );
 
-        canvasParams.setMargins(
-                dp(12), dp(6),
-                dp(12), dp(6)
+        canvasParams.topMargin = dp(6);
+        canvasParams.bottomMargin = dp(8);
+
+        canvasContainer.addView(
+                drawingView,
+                canvasParams
         );
 
-        root.addView(
-                drawingView, canvasParams
+        TextView hint = text(
+                "Рисуй пальцем на белом холсте",
+                12,
+                false
         );
 
-        TextView hint = new TextView(this);
-        hint.setText(
-                "Рисуй пальцем на белом холсте"
-        );
         hint.setGravity(Gravity.CENTER);
-        hint.setTextSize(13);
+
         hint.setTextColor(
                 CodeBoxTheme.secondaryText(this)
         );
 
-        root.addView(hint);
+        canvasContainer.addView(hint);
 
-        createPalette(root);
-        createTools(root);
-
-        setContentView(root);
+        root.addView(
+                canvasContainer,
+                new LinearLayout.LayoutParams(
+                        -1, 0, 1
+                )
+        );
     }
 
-    private void createPalette(LinearLayout root) {
-        ScrollView scroll = new ScrollView(this);
+    private void createPalette(
+            LinearLayout root) {
 
-        LinearLayout palette = new LinearLayout(this);
-        palette.setOrientation(LinearLayout.HORIZONTAL);
-        palette.setGravity(Gravity.CENTER);
-        palette.setPadding(
-                dp(8), dp(10),
-                dp(8), dp(10)
+        LinearLayout section =
+                new LinearLayout(this);
+
+        section.setOrientation(
+                LinearLayout.VERTICAL
         );
 
-        int[] colors = {
-                Color.BLACK,
-                Color.WHITE,
-                Color.RED,
-                Color.rgb(255, 140, 0),
-                Color.YELLOW,
-                Color.GREEN,
-                Color.CYAN,
-                Color.BLUE,
-                Color.MAGENTA,
-                Color.GRAY
-        };
+        section.setPadding(
+                dp(12), dp(8),
+                dp(12), dp(6)
+        );
+
+        TextView title = text(
+                "ПАЛИТРА ЦВЕТОВ",
+                11,
+                true
+        );
+
+        title.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        section.addView(title);
+
+        HorizontalScrollView horizontal =
+                new HorizontalScrollView(this);
+
+        horizontal.setHorizontalScrollBarEnabled(
+                false
+        );
+
+        paletteLayout =
+                new LinearLayout(this);
+
+        paletteLayout.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        paletteLayout.setGravity(
+                Gravity.CENTER_VERTICAL
+        );
+
+        paletteLayout.setPadding(
+                0, dp(8),
+                0, dp(6)
+        );
+
+        colorSwatches.clear();
 
         for (int color : colors) {
-            TextView swatch = new TextView(this);
-            swatch.setText("●");
-            swatch.setTextSize(27);
-            swatch.setTextColor(color);
+
+            TextView swatch =
+                    new TextView(this);
+
             swatch.setGravity(Gravity.CENTER);
+            swatch.setText("●");
+            swatch.setTextSize(26);
+            swatch.setTextColor(color);
 
             LinearLayout.LayoutParams params =
                     new LinearLayout.LayoutParams(
-                            dp(42), dp(48)
+                            dp(48), dp(48)
                     );
 
-            palette.addView(swatch, params);
+            params.rightMargin = dp(6);
+
+            paletteLayout.addView(
+                    swatch, params
+            );
+
+            colorSwatches.add(swatch);
+
+            swatch.setContentDescription(
+                    "Выбрать цвет"
+            );
 
             swatch.setOnClickListener(v -> {
                 selectedColor = color;
+                eraserMode = false;
 
-                Toast.makeText(
-                        this,
-                        "Цвет выбран",
-                        Toast.LENGTH_SHORT
-                ).show();
+                updatePaletteSelection();
+                updateToolStatus();
             });
         }
 
-        android.widget.HorizontalScrollView horizontal =
-                new android.widget.HorizontalScrollView(this);
-
-        horizontal.setHorizontalScrollBarEnabled(false);
-        horizontal.addView(palette);
-
-        root.addView(horizontal);
+        horizontal.addView(paletteLayout);
+        section.addView(horizontal);
+        root.addView(section);
     }
 
-    private void createTools(LinearLayout root) {
-        LinearLayout tools = new LinearLayout(this);
-        tools.setOrientation(LinearLayout.HORIZONTAL);
-        tools.setPadding(
-                dp(8), dp(8),
-                dp(8), dp(14)
+    private void updatePaletteSelection() {
+
+        for (int i = 0;
+                i < colorSwatches.size();
+                i++) {
+
+            TextView swatch =
+                    colorSwatches.get(i);
+
+            boolean selected =
+                    !eraserMode
+                    && colors[i] == selectedColor;
+
+            GradientDrawable background =
+                    rounded(
+                            selected
+                                    ? (CodeBoxTheme.isDark(this)
+                                            ? 0xFF46366D
+                                            : 0xFFE6DDFB)
+                                    : CodeBoxTheme.surface(this),
+                            14
+                    );
+
+            background.setStroke(
+                    dp(selected ? 2 : 1),
+                    selected
+                            ? PURPLE
+                            : (CodeBoxTheme.isDark(this)
+                                    ? 0xFF454555
+                                    : 0xFFE2E2EA)
+            );
+
+            swatch.setBackground(background);
+        }
+    }
+
+    private void createTools(
+            LinearLayout root) {
+
+        LinearLayout section =
+                new LinearLayout(this);
+
+        section.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        section.setPadding(
+                dp(12), dp(6),
+                dp(12), dp(14)
+        );
+
+        TextView title = text(
+                "ИНСТРУМЕНТЫ",
+                11,
+                true
+        );
+
+        title.setTextColor(
+                CodeBoxTheme.secondaryText(this)
+        );
+
+        section.addView(title);
+
+        LinearLayout firstRow =
+                new LinearLayout(this);
+
+        firstRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        LinearLayout.LayoutParams rowParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(46)
+                );
+
+        rowParams.topMargin = dp(8);
+
+        section.addView(
+                firstRow, rowParams
         );
 
         TextView thin = button(
-                "Тонкая",
-                CodeBoxTheme.BLUE
+                "Тонкая", BLUE
+        );
+
+        TextView medium = button(
+                "Средняя", PURPLE
         );
 
         TextView thick = button(
-                "Толстая",
-                CodeBoxTheme.PURPLE
+                "Толстая", PURPLE
+        );
+
+        addTool(firstRow, thin);
+        addTool(firstRow, medium);
+        addTool(firstRow, thick);
+
+        thin.setOnClickListener(v -> {
+            brushSize = 4f;
+            eraserMode = false;
+            updateToolStatus();
+            updatePaletteSelection();
+        });
+
+        medium.setOnClickListener(v -> {
+            brushSize = 8f;
+            eraserMode = false;
+            updateToolStatus();
+            updatePaletteSelection();
+        });
+
+        thick.setOnClickListener(v -> {
+            brushSize = 22f;
+            eraserMode = false;
+            updateToolStatus();
+            updatePaletteSelection();
+        });
+
+        LinearLayout secondRow =
+                new LinearLayout(this);
+
+        secondRow.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        LinearLayout.LayoutParams secondParams =
+                new LinearLayout.LayoutParams(
+                        -1, dp(46)
+                );
+
+        secondParams.topMargin = dp(8);
+
+        section.addView(
+                secondRow, secondParams
         );
 
         TextView eraser = button(
-                "Ластик",
-                0xFF777777
+                "⌫ Ластик",
+                0xFF777788
         );
 
         TextView clear = button(
-                "Очистить",
-                0xFFD94444
+                "✕ Очистить",
+                RED
         );
 
-        addTool(tools, thin);
-        addTool(tools, thick);
-        addTool(tools, eraser);
-        addTool(tools, clear);
-
-        thin.setOnClickListener(v -> brushSize = 4f);
-
-        thick.setOnClickListener(v -> brushSize = 22f);
+        addTool(secondRow, eraser);
+        addTool(secondRow, clear);
 
         eraser.setOnClickListener(v -> {
-            selectedColor = Color.WHITE;
+            eraserMode = true;
             brushSize = 30f;
+
+            updateToolStatus();
+            updatePaletteSelection();
         });
 
         clear.setOnClickListener(v ->
                 new AlertDialog.Builder(this)
                         .setTitle("Очистить холст?")
                         .setMessage(
-                                "Все нарисованные линии будут удалены."
+                                "Все нарисованные линии "
+                                        + "будут удалены."
                         )
-                        .setNegativeButton("Отмена", null)
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
                         .setPositiveButton(
                                 "Очистить",
-                                (dialog, which) ->
-                                        drawingView.clear()
+                                (dialog, which) -> {
+                                    drawingView.clear();
+                                    updateToolStatus();
+                                }
                         )
                         .show()
         );
 
-        root.addView(tools);
+        root.addView(section);
     }
 
     private void addTool(
-            LinearLayout parent, TextView tool) {
+            LinearLayout parent,
+            TextView tool) {
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
-                        0, dp(48), 1
+                        0, -1, 1
                 );
 
         params.setMargins(
-                dp(2), 0, dp(2), 0
+                dp(2), 0,
+                dp(2), 0
         );
 
         parent.addView(tool, params);
     }
 
+    private void updateToolStatus() {
+
+        if (toolStatus == null) {
+            return;
+        }
+
+        if (eraserMode) {
+            toolStatus.setText(
+                    "● Ластик • 30"
+            );
+
+            toolStatus.setTextColor(
+                    0xFF9999AA
+            );
+
+        } else {
+            toolStatus.setText(
+                    "● Кисть • "
+                            + (int) brushSize
+            );
+
+            toolStatus.setTextColor(
+                    CodeBoxTheme.PURPLE
+            );
+        }
+    }
+
+    private void attemptExit() {
+
+        if (drawingView == null
+                || !drawingView.hasDrawing()) {
+            finish();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Выйти из редактора?")
+                .setMessage(
+                        "Несохранённый рисунок "
+                                + "будет потерян."
+                )
+                .setPositiveButton(
+                        "Сохранить",
+                        (dialog, which) ->
+                                showSaveDialog()
+                )
+                .setNegativeButton(
+                        "Не сохранять",
+                        (dialog, which) -> finish()
+                )
+                .setNeutralButton(
+                        "Отмена", null
+                )
+                .show();
+    }
+
+    @Override
+    public void onBackPressed() {
+        attemptExit();
+    }
+
     private void showSaveDialog() {
+
         EditText input = new EditText(this);
+
         input.setSingleLine(true);
         input.setText("drawing.png");
         input.selectAll();
 
-        LinearLayout wrapper = new LinearLayout(this);
+        LinearLayout wrapper =
+                new LinearLayout(this);
+
         wrapper.setPadding(
                 dp(22), dp(10),
                 dp(22), dp(8)
@@ -378,21 +811,31 @@ public class GraphicsEditorActivity extends Activity {
 
         AlertDialog dialog =
                 new AlertDialog.Builder(this)
-                        .setTitle("Сохранить изображение")
+                        .setTitle(
+                                "Сохранить изображение"
+                        )
+                        .setMessage(
+                                "PNG • 1024 × 1024"
+                        )
                         .setView(wrapper)
-                        .setPositiveButton("Сохранить", null)
-                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton(
+                                "Сохранить", null
+                        )
+                        .setNegativeButton(
+                                "Отмена", null
+                        )
                         .create();
 
         dialog.setOnShowListener(ignored ->
                 dialog.getButton(
                         AlertDialog.BUTTON_POSITIVE
                 ).setOnClickListener(v -> {
+
                     String name = input.getText()
                             .toString().trim();
 
                     if (!name.toLowerCase(
-                            java.util.Locale.ROOT
+                            Locale.ROOT
                     ).endsWith(".png")) {
                         name += ".png";
                     }
@@ -401,6 +844,7 @@ public class GraphicsEditorActivity extends Activity {
                             "[^/\\\\\\p{Cntrl}]+\\.png"
                     ) || name.equals(".png")
                             || name.equals("..png")) {
+
                         input.setError(
                                 "Недопустимое имя файла"
                         );
@@ -440,6 +884,7 @@ public class GraphicsEditorActivity extends Activity {
         if (!destination.getCanonicalFile()
                 .getParentFile()
                 .equals(targetDirectory)) {
+
             throw new IOException(
                     "Недопустимый путь файла"
             );
@@ -447,7 +892,8 @@ public class GraphicsEditorActivity extends Activity {
 
         if (destination.exists()) {
             throw new IOException(
-                    "Файл с таким именем уже существует"
+                    "Файл с таким именем "
+                            + "уже существует"
             );
         }
 
@@ -464,19 +910,23 @@ public class GraphicsEditorActivity extends Activity {
             drawingView.renderTo(canvas);
 
             try (FileOutputStream output =
-                         new FileOutputStream(destination)) {
+                         new FileOutputStream(
+                                 destination
+                         )) {
 
                 if (!bitmap.compress(
                         Bitmap.CompressFormat.PNG,
                         100,
                         output
                 )) {
+
                     throw new IOException(
                             "Не удалось сохранить PNG"
                     );
                 }
 
                 output.flush();
+
             } catch (IOException e) {
                 destination.delete();
                 throw e;
@@ -501,8 +951,17 @@ public class GraphicsEditorActivity extends Activity {
 
         private Bitmap drawingBitmap;
         private Canvas drawingCanvas;
-        private Paint paint;
-        private Path currentPath;
+
+        private final Paint paint;
+        private final Path currentPath;
+
+        private final Paint bitmapPaint;
+
+        private int strokeColor = Color.BLACK;
+        private float strokeWidth = 8f;
+
+        private boolean drawingStarted = false;
+        private boolean hasDrawing = false;
 
         DrawingView() {
             super(GraphicsEditorActivity.this);
@@ -526,6 +985,11 @@ public class GraphicsEditorActivity extends Activity {
             );
 
             currentPath = new Path();
+
+            bitmapPaint = new Paint(
+                    Paint.ANTI_ALIAS_FLAG
+                            | Paint.FILTER_BITMAP_FLAG
+            );
         }
 
         @Override
@@ -552,14 +1016,22 @@ public class GraphicsEditorActivity extends Activity {
                     drawingBitmap
             );
 
-            drawingCanvas.drawColor(
-                    Color.WHITE
-            );
+            drawingCanvas.drawColor(Color.WHITE);
 
-            if (old != null) {
-                drawingCanvas.drawBitmap(
-                        old, 0, 0, null
+            if (old != null
+                    && !old.isRecycled()) {
+
+                RectF destination = new RectF(
+                        0, 0, w, h
                 );
+
+                drawingCanvas.drawBitmap(
+                        old,
+                        null,
+                        destination,
+                        bitmapPaint
+                );
+
                 old.recycle();
             }
         }
@@ -570,16 +1042,19 @@ public class GraphicsEditorActivity extends Activity {
 
             if (drawingBitmap != null) {
                 canvas.drawBitmap(
-                        drawingBitmap, 0, 0, null
+                        drawingBitmap,
+                        0, 0, bitmapPaint
                 );
             }
 
-            paint.setColor(selectedColor);
-            paint.setStrokeWidth(brushSize);
+            if (drawingStarted) {
+                paint.setColor(strokeColor);
+                paint.setStrokeWidth(strokeWidth);
 
-            canvas.drawPath(
-                    currentPath, paint
-            );
+                canvas.drawPath(
+                        currentPath, paint
+                );
+            }
         }
 
         @Override
@@ -592,34 +1067,60 @@ public class GraphicsEditorActivity extends Activity {
             switch (event.getActionMasked()) {
 
                 case MotionEvent.ACTION_DOWN:
+
                     currentPath.reset();
                     currentPath.moveTo(x, y);
+
+                    strokeColor = eraserMode
+                            ? Color.WHITE
+                            : selectedColor;
+
+                    strokeWidth = brushSize;
+                    drawingStarted = true;
+
                     invalidate();
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
+
+                    if (!drawingStarted) {
+                        return true;
+                    }
+
                     currentPath.lineTo(x, y);
                     invalidate();
                     return true;
 
                 case MotionEvent.ACTION_UP:
+
+                    if (!drawingStarted) {
+                        return true;
+                    }
+
                     currentPath.lineTo(x, y);
 
                     if (drawingCanvas != null) {
-                        paint.setColor(selectedColor);
-                        paint.setStrokeWidth(brushSize);
+                        paint.setColor(strokeColor);
+                        paint.setStrokeWidth(strokeWidth);
 
                         drawingCanvas.drawPath(
                                 currentPath, paint
                         );
+
+                        hasDrawing = true;
                     }
 
                     currentPath.reset();
+                    drawingStarted = false;
+
                     invalidate();
                     return true;
 
                 case MotionEvent.ACTION_CANCEL:
+
                     currentPath.reset();
+                    drawingStarted = false;
+
                     invalidate();
                     return true;
             }
@@ -628,6 +1129,7 @@ public class GraphicsEditorActivity extends Activity {
         }
 
         void clear() {
+
             if (drawingCanvas != null) {
                 drawingCanvas.drawColor(
                         Color.WHITE
@@ -635,11 +1137,20 @@ public class GraphicsEditorActivity extends Activity {
             }
 
             currentPath.reset();
+            drawingStarted = false;
+            hasDrawing = false;
+
             invalidate();
         }
 
+        boolean hasDrawing() {
+            return hasDrawing || drawingStarted;
+        }
+
         void renderTo(Canvas target) {
-            if (drawingBitmap == null) {
+
+            if (drawingBitmap == null
+                    || drawingBitmap.isRecycled()) {
                 return;
             }
 
@@ -667,7 +1178,7 @@ public class GraphicsEditorActivity extends Activity {
 
             target.drawBitmap(
                     drawingBitmap,
-                    0, 0, null
+                    0, 0, bitmapPaint
             );
 
             target.restore();
@@ -679,6 +1190,7 @@ public class GraphicsEditorActivity extends Activity {
 
             if (drawingBitmap != null
                     && !drawingBitmap.isRecycled()) {
+
                 drawingBitmap.recycle();
                 drawingBitmap = null;
             }

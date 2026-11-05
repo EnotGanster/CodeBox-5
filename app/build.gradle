@@ -1,4 +1,3 @@
-
 plugins {
     id 'com.android.application'
 }
@@ -28,4 +27,7 @@ android {
 }
 
 dependencies {
+    // Eclipse Compiler for Java.
+    // Включается в APK CodeBox 5 при сборке через Gradle.
+    implementation 'org.eclipse.jdt:ecj:3.40.0'
 }

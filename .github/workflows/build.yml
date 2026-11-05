@@ -30,6 +30,58 @@ jobs:
       - name: Build Debug APK
         run: gradle --no-daemon assembleDebug
 
+      - name: Prepare Android API 35
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          if [ -z "$SDK" ]; then
+            echo "ERROR: Android SDK not found"
+            exit 1
+          fi
+
+          JAR="$SDK/platforms/android-35/android.jar"
+
+          if [ ! -s "$JAR" ]; then
+            echo "Android API 35 is missing."
+            echo "Installing Android SDK Platform 35..."
+
+            SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+
+            if [ ! -x "$SDKMANAGER" ]; then
+              echo "ERROR: sdkmanager not found"
+              exit 1
+            fi
+
+            "$SDKMANAGER" "platforms;android-35"
+          fi
+
+          if [ ! -s "$JAR" ]; then
+            echo "ERROR: android.jar missing or empty"
+            exit 1
+          fi
+
+          mkdir -p android-api-export
+
+          cp "$JAR" android-api-export/android.jar
+
+          cd android-api-export
+
+          sha256sum android.jar > SHA256SUMS.txt
+
+          echo "Android API 35 prepared."
+          cat SHA256SUMS.txt
+
+      - name: Upload Android API 35
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeBox-5-Android-API-35
+          path: android-api-export/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

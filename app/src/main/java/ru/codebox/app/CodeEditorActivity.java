@@ -7,10 +7,12 @@ import android.os.Bundle;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.text.Layout;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.EditText;
@@ -32,8 +34,15 @@ import java.util.Locale;
 
 public class CodeEditorActivity extends Activity {
 
+    private static final int EDITOR_BG = 0xFF171923;
+    private static final int EDITOR_TEXT = 0xFFE5E7EB;
+    private static final int EDITOR_MUTED = 0xFF9298AB;
+    private static final int PANEL_BG = 0xFF242635;
+    private static final int PURPLE = 0xFF7650E8;
+
     private CodeEditText editor;
     private TextView title;
+    private TextView statusText;
     private File currentFile;
     private String savedContent = "";
     private String currentProjectName = "";
@@ -61,9 +70,48 @@ public class CodeEditorActivity extends Activity {
     };
 
     private int dp(float value) {
-        return (int) (value *
-                getResources().getDisplayMetrics().density
-                + 0.5f);
+        return CodeBoxTheme.dp(this, value);
+    }
+
+    private GradientDrawable rounded(
+            int color, int radius) {
+
+        GradientDrawable drawable =
+                new GradientDrawable();
+
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radius));
+        return drawable;
+    }
+
+    private GradientDrawable headerGradient() {
+        return new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        0xFF8657F5,
+                        0xFF6535D5,
+                        0xFF4522A3
+                }
+        );
+    }
+
+    private TextView text(
+            String value, int size, boolean bold) {
+
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(
+                CodeBoxTheme.textColor(this)
+        );
+
+        if (bold) {
+            view.setTypeface(
+                    Typeface.DEFAULT, Typeface.BOLD
+            );
+        }
+
+        return view;
     }
 
     @Override
@@ -186,191 +234,21 @@ public class CodeEditorActivity extends Activity {
     private void buildEditor() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFFF4F5F8);
-
-        title = new TextView(this);
-        title.setText(currentFile.getName());
-        title.setTextSize(18);
-        title.setTypeface(
-                Typeface.DEFAULT, Typeface.BOLD
-        );
-        title.setTextColor(0xFF252535);
-        title.setPadding(
-                dp(16), dp(12), dp(16), dp(8)
-        );
-        title.setSingleLine(true);
-        root.addView(title);
-
-        LinearLayout toolbar = new LinearLayout(this);
-        toolbar.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button back = new Button(this);
-        back.setText("Назад");
-
-        undoButton = new Button(this);
-        undoButton.setText("↶");
-        undoButton.setTextSize(22);
-        undoButton.setContentDescription(
-                "Отменить изменение"
+        root.setBackgroundColor(
+                CodeBoxTheme.background(this)
         );
 
-        redoButton = new Button(this);
-        redoButton.setText("↷");
-        redoButton.setTextSize(22);
-        redoButton.setContentDescription(
-                "Повторить изменение"
-        );
-
-        Button save = new Button(this);
-        save.setText("Сохранить");
-
-        toolbar.addView(
-                back,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 2
-                )
-        );
-
-        toolbar.addView(
-                undoButton,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 1
-                )
-        );
-
-        toolbar.addView(
-                redoButton,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 1
-                )
-        );
-
-        toolbar.addView(
-                save,
-                new LinearLayout.LayoutParams(
-                        0, dp(52), 2
-                )
-        );
-
-        root.addView(toolbar);
-
-        // Кнопка вставки шаблонов.
-        Button snippetsButton = new Button(this);
-        snippetsButton.setText("📚 Шаблоны Java/XML");
-        snippetsButton.setAllCaps(false);
-
-        root.addView(
-                snippetsButton,
-                new LinearLayout.LayoutParams(
-                        -1, dp(48)
-                )
-        );
-
-        snippetsButton.setOnClickListener(
-                v -> showSnippetPicker()
-        );
-
-        TextView info = new TextView(this);
-        info.setText(
-                "CodeBox 5  •  Редактор кода"
-        );
-        info.setTextSize(12);
-        info.setTextColor(0xFF777788);
-        info.setPadding(
-                dp(16), dp(6), dp(8), dp(6)
-        );
-        root.addView(info);
-
-        ScrollView vertical = new ScrollView(this);
-        vertical.setFillViewport(true);
-
-        HorizontalScrollView horizontal =
-                new HorizontalScrollView(this);
-        horizontal.setFillViewport(true);
-
-        editor = new CodeEditText();
-
-        editor.setTextSize(14);
-        editor.setTypeface(Typeface.MONOSPACE);
-        editor.setTextColor(0xFF202020);
-        editor.setGravity(Gravity.TOP | Gravity.START);
-        editor.setBackgroundColor(0xFFFFFFFF);
-        editor.setHorizontallyScrolling(true);
-        editor.setSingleLine(false);
-
-        editor.setInputType(
-                InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        );
-
-        editor.setPadding(
-                dp(58), dp(16),
-                dp(16), dp(16)
-        );
-
-        editor.setText(savedContent);
-        editor.setSelection(0);
-
-        horizontal.addView(
-                editor,
-                new HorizontalScrollView.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.MATCH_PARENT
-                )
-        );
-
-        vertical.addView(horizontal);
-
-        root.addView(
-                vertical,
-                new LinearLayout.LayoutParams(
-                        -1, 0, 1
-                )
-        );
-
-        EditorToolbar editorToolbar =
-                new EditorToolbar(this, editor);
-
-        root.addView(
-                editorToolbar,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(52)
-                )
-        );
+        createHeader(root);
+        createActions(root);
+        createSnippetButton(root);
+        createEditorArea(root);
+        createBottomToolbar(root);
 
         setContentView(root);
 
         historyManager = new EditorHistoryManager(
                 editor
         );
-
-        back.setOnClickListener(
-                v -> attemptExit()
-        );
-
-        save.setOnClickListener(
-                v -> saveFile()
-        );
-
-        undoButton.setOnClickListener(v -> {
-            if (historyManager != null) {
-                historyManager.undo();
-                updateTitle();
-                scheduleHighlight();
-                updateHistoryButtons();
-            }
-        });
-
-        redoButton.setOnClickListener(v -> {
-            if (historyManager != null) {
-                historyManager.redo();
-                updateTitle();
-                scheduleHighlight();
-                updateHistoryButtons();
-            }
-        });
 
         editor.addTextChangedListener(
                 new TextWatcher() {
@@ -479,7 +357,387 @@ public class CodeEditorActivity extends Activity {
                 editor, currentFile.getName()
         );
 
+        updateTitle();
         updateHistoryButtons();
+    }
+
+    private void createHeader(LinearLayout root) {
+
+        LinearLayout header =
+                new LinearLayout(this);
+
+        header.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        header.setPadding(
+                dp(14), dp(14),
+                dp(14), dp(14)
+        );
+
+        header.setBackground(headerGradient());
+
+        TextView back = text("‹", 32, true);
+        back.setTextColor(0xFFFFFFFF);
+        back.setGravity(Gravity.CENTER);
+
+        back.setBackground(
+                rounded(0x33FFFFFF, 15)
+        );
+
+        header.addView(
+                back,
+                new LinearLayout.LayoutParams(
+                        dp(44), dp(44)
+                )
+        );
+
+        back.setOnClickListener(
+                v -> attemptExit()
+        );
+
+        LinearLayout labels =
+                new LinearLayout(this);
+
+        labels.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        labels.setPadding(
+                dp(12), 0, dp(8), 0
+        );
+
+        title = text(
+                currentFile.getName(), 18, true
+        );
+
+        title.setTextColor(0xFFFFFFFF);
+        title.setSingleLine(true);
+        title.setEllipsize(
+                TextUtils.TruncateAt.END
+        );
+
+        labels.addView(title);
+
+        TextView subtitle = text(
+                currentProjectName + "  •  Редактор",
+                11,
+                false
+        );
+
+        subtitle.setTextColor(0xFFE8DDFF);
+
+        labels.addView(subtitle);
+
+        header.addView(
+                labels,
+                new LinearLayout.LayoutParams(
+                        0, -2, 1
+                )
+        );
+
+        TextView icon = text("</>", 17, true);
+        icon.setTextColor(0xFFFFFFFF);
+        icon.setGravity(Gravity.CENTER);
+
+        icon.setBackground(
+                rounded(0x33FFFFFF, 15)
+        );
+
+        header.addView(
+                icon,
+                new LinearLayout.LayoutParams(
+                        dp(44), dp(44)
+                )
+        );
+
+        root.addView(header);
+    }
+
+    private void createActions(LinearLayout root) {
+
+        LinearLayout toolbar =
+                new LinearLayout(this);
+
+        toolbar.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+
+        toolbar.setPadding(
+                dp(8), dp(10),
+                dp(8), dp(8)
+        );
+
+        toolbar.setBackgroundColor(
+                CodeBoxTheme.surface(this)
+        );
+
+        undoButton = new Button(this);
+        undoButton.setText("↶");
+        undoButton.setTextSize(21);
+        undoButton.setAllCaps(false);
+        undoButton.setContentDescription(
+                "Отменить изменение"
+        );
+
+        redoButton = new Button(this);
+        redoButton.setText("↷");
+        redoButton.setTextSize(21);
+        redoButton.setAllCaps(false);
+        redoButton.setContentDescription(
+                "Повторить изменение"
+        );
+
+        Button save = new Button(this);
+        save.setText("✓ Сохранить");
+        save.setTextSize(13);
+        save.setAllCaps(false);
+
+        toolbar.addView(
+                undoButton,
+                new LinearLayout.LayoutParams(
+                        0, dp(48), 1
+                )
+        );
+
+        toolbar.addView(
+                redoButton,
+                new LinearLayout.LayoutParams(
+                        0, dp(48), 1
+                )
+        );
+
+        toolbar.addView(
+                save,
+                new LinearLayout.LayoutParams(
+                        0, dp(48), 2
+                )
+        );
+
+        root.addView(toolbar);
+
+        undoButton.setOnClickListener(v -> {
+            if (historyManager != null) {
+                historyManager.undo();
+                updateTitle();
+                scheduleHighlight();
+                updateHistoryButtons();
+            }
+        });
+
+        redoButton.setOnClickListener(v -> {
+            if (historyManager != null) {
+                historyManager.redo();
+                updateTitle();
+                scheduleHighlight();
+                updateHistoryButtons();
+            }
+        });
+
+        save.setOnClickListener(
+                v -> saveFile()
+        );
+    }
+
+    private void createSnippetButton(
+            LinearLayout root) {
+
+        LinearLayout wrapper =
+                new LinearLayout(this);
+
+        wrapper.setPadding(
+                dp(12), dp(8),
+                dp(12), dp(8)
+        );
+
+        TextView snippets = text(
+                "📚  Шаблоны Java / XML",
+                14,
+                true
+        );
+
+        snippets.setGravity(Gravity.CENTER);
+
+        CodeBoxTheme.styleColoredButton(
+                snippets,
+                CodeBoxTheme.PURPLE
+        );
+
+        wrapper.addView(
+                snippets,
+                new LinearLayout.LayoutParams(
+                        -1, dp(46)
+                )
+        );
+
+        root.addView(wrapper);
+
+        snippets.setOnClickListener(
+                v -> showSnippetPicker()
+        );
+    }
+
+    private void createEditorArea(
+            LinearLayout root) {
+
+        LinearLayout editorPanel =
+                new LinearLayout(this);
+
+        editorPanel.setOrientation(
+                LinearLayout.VERTICAL
+        );
+
+        editorPanel.setBackgroundColor(EDITOR_BG);
+
+        LinearLayout statusBar =
+                new LinearLayout(this);
+
+        statusBar.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        statusBar.setGravity(Gravity.CENTER_VERTICAL);
+
+        statusBar.setPadding(
+                dp(14), dp(8),
+                dp(14), dp(8)
+        );
+
+        statusBar.setBackgroundColor(PANEL_BG);
+
+        TextView language = text(
+                getLanguageName(), 11, true
+        );
+
+        language.setTextColor(
+                0xFFB9A5FF
+        );
+
+        statusBar.addView(
+                language,
+                new LinearLayout.LayoutParams(
+                        0, -2, 1
+                )
+        );
+
+        statusText = text(
+                "● Сохранено", 11, false
+        );
+
+        statusText.setTextColor(
+                0xFF71D7A4
+        );
+
+        statusBar.addView(statusText);
+
+        editorPanel.addView(statusBar);
+
+        ScrollView vertical =
+                new ScrollView(this);
+
+        vertical.setFillViewport(true);
+        vertical.setVerticalScrollBarEnabled(false);
+
+        HorizontalScrollView horizontal =
+                new HorizontalScrollView(this);
+
+        horizontal.setFillViewport(true);
+        horizontal.setHorizontalScrollBarEnabled(false);
+
+        editor = new CodeEditText();
+
+        editor.setTextSize(14);
+        editor.setTypeface(Typeface.MONOSPACE);
+        editor.setTextColor(EDITOR_TEXT);
+        editor.setHintTextColor(EDITOR_MUTED);
+
+        editor.setGravity(
+                Gravity.TOP | Gravity.START
+        );
+
+        editor.setBackgroundColor(EDITOR_BG);
+        editor.setHorizontallyScrolling(true);
+        editor.setSingleLine(false);
+
+        editor.setInputType(
+                InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        );
+
+        editor.setPadding(
+                dp(58), dp(16),
+                dp(20), dp(20)
+        );
+
+        editor.setText(savedContent);
+        editor.setSelection(0);
+
+        horizontal.addView(
+                editor,
+                new HorizontalScrollView.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                )
+        );
+
+        vertical.addView(horizontal);
+
+        editorPanel.addView(
+                vertical,
+                new LinearLayout.LayoutParams(
+                        -1, 0, 1
+                )
+        );
+
+        root.addView(
+                editorPanel,
+                new LinearLayout.LayoutParams(
+                        -1, 0, 1
+                )
+        );
+    }
+
+    private String getLanguageName() {
+        if (currentFile == null) {
+            return "TEXT";
+        }
+
+        String name = currentFile.getName()
+                .toLowerCase(Locale.ROOT);
+
+        if (name.endsWith(".java")) {
+            return "JAVA";
+        }
+        if (name.endsWith(".xml")) {
+            return "XML";
+        }
+        if (name.endsWith(".gradle")
+                || name.endsWith(".gradle.kts")) {
+            return "GRADLE";
+        }
+        if (name.endsWith(".json")) {
+            return "JSON";
+        }
+        return "TEXT";
+    }
+
+    private void createBottomToolbar(
+            LinearLayout root) {
+
+        EditorToolbar editorToolbar =
+                new EditorToolbar(this, editor);
+
+        root.addView(
+                editorToolbar,
+                new LinearLayout.LayoutParams(
+                        -1, dp(52)
+                )
+        );
     }
 
     // Выбор сохранённого шаблона.
@@ -862,6 +1120,22 @@ public class CodeEditorActivity extends Activity {
                     (hasUnsavedChanges() ? " *" : "")
             );
         }
+
+        if (statusText != null) {
+            boolean modified = hasUnsavedChanges();
+
+            statusText.setText(
+                    modified
+                            ? "● Изменён"
+                            : "● Сохранено"
+            );
+
+            statusText.setTextColor(
+                    modified
+                            ? 0xFFFFC978
+                            : 0xFF71D7A4
+            );
+        }
     }
 
     private void saveFile() {
@@ -1003,7 +1277,7 @@ public class CodeEditorActivity extends Activity {
         CodeEditText() {
             super(CodeEditorActivity.this);
 
-            linePaint.setColor(0xFF9999AA);
+            linePaint.setColor(EDITOR_MUTED);
             linePaint.setTextSize(dp(12));
             linePaint.setTypeface(
                     Typeface.MONOSPACE

@@ -9,7 +9,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -18,18 +17,12 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.IOException;
 
-/**
- * Build diagnostics screen. APK/AAB compilers are NOT connected yet.
- * A requested build is explicitly marked FAILED, never as successful.
- */
+/** Diagnostics UI; real APK/AAB compilation is not yet implemented. */
 public final class CodeBoxBuildActivity extends Activity {
-
     private CodeBoxBuildManager manager;
     private String projectName;
     private TextView statusView;
     private TextView reportView;
-    private TextView apkButton;
-    private TextView aabButton;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,8 +33,7 @@ public final class CodeBoxBuildActivity extends Activity {
                     .setTitle("Ошибка проекта")
                     .setMessage("Не передано корректное имя проекта.")
                     .setPositiveButton("Закрыть", (dialog, which) -> finish())
-                    .setCancelable(false)
-                    .show();
+                    .setCancelable(false).show();
             return;
         }
         try {
@@ -51,8 +43,7 @@ public final class CodeBoxBuildActivity extends Activity {
                     .setTitle("Ошибка журнала")
                     .setMessage(exception.toString())
                     .setPositiveButton("Закрыть", (dialog, which) -> finish())
-                    .setCancelable(false)
-                    .show();
+                    .setCancelable(false).show();
             return;
         }
         buildInterface();
@@ -71,8 +62,7 @@ public final class CodeBoxBuildActivity extends Activity {
         root.setBackgroundColor(background);
         setContentView(root);
 
-        TextView title = label("Сборка проекта", 23, white, true);
-        root.addView(title);
+        root.addView(label("Сборка проекта", 23, white, true));
         TextView subtitle = label(projectName + "  •  Локально, без интернета", 13, muted, false);
         LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
         subtitleParams.topMargin = dp(5);
@@ -90,8 +80,8 @@ public final class CodeBoxBuildActivity extends Activity {
         buttonsParams.topMargin = dp(12);
         root.addView(buttons, buttonsParams);
 
-        apkButton = actionButton("Собрать APK", Color.rgb(107, 73, 218));
-        aabButton = actionButton("Собрать AAB", Color.rgb(37, 111, 192));
+        TextView apkButton = actionButton("Собрать APK", Color.rgb(107, 73, 218));
+        TextView aabButton = actionButton("Собрать AAB", Color.rgb(37, 111, 192));
         LinearLayout.LayoutParams first = new LinearLayout.LayoutParams(0, dp(48), 1f);
         first.rightMargin = dp(6);
         buttons.addView(apkButton, first);
@@ -110,8 +100,7 @@ public final class CodeBoxBuildActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackground(shape(panel, 12));
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        root.addView(scroll, scrollParams);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
         reportView = label("Журнал появится после запуска проверки.", 12, muted, false);
         reportView.setTypeface(Typeface.MONOSPACE);
         reportView.setTextIsSelectable(true);
@@ -140,9 +129,8 @@ public final class CodeBoxBuildActivity extends Activity {
         if (manager == null) return;
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
-                .setMessage("Компиляторы Java, AAPT2, D8 и упаковщик пока не подключены. "
-                        + "Будет создан диагностический журнал с честным статусом FAILED. "
-                        + "APK/AAB сейчас не создаётся.")
+                .setMessage("Проверим доступные инструменты и запишем подробный журнал. "
+                        + "Реальная компиляция пока не подключена: APK/AAB не будет создан.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Записать диагностику", (dialog, which) -> runDiagnostic(format))
                 .show();
@@ -151,21 +139,32 @@ public final class CodeBoxBuildActivity extends Activity {
     private void runDiagnostic(CodeBoxBuildManager.OutputFormat format) {
         try {
             manager.start(projectName, format);
-            manager.setStage("Проверка окружения");
-            File directory = new File(new File(getFilesDir(), "projects"), projectName);
-            if (!directory.isDirectory()) {
+            manager.setStage("Проверка проекта");
+            File projectsRoot = new File(getFilesDir(), "projects").getCanonicalFile();
+            File directory = new File(projectsRoot, projectName).getCanonicalFile();
+            if (!projectsRoot.equals(directory.getParentFile()) || !directory.isDirectory()) {
                 manager.fail("Папка проекта не найдена: " + directory.getAbsolutePath());
             } else {
                 manager.info("Папка проекта найдена: " + directory.getAbsolutePath());
                 manager.info("Формат результата: " + format.name());
-                manager.fail("Локальный компилятор и упаковщик " + format.name()
-                        + " пока не подключены. Сборка не выполнялась.");
+                manager.setStage("Проверка инструментов");
+                try {
+                    CodeBoxToolchainInspector.Result result =
+                            CodeBoxToolchainInspector.inspect(this);
+                    manager.info(result.report);
+                    manager.info("Готовность APK: " + (result.readyForApk ? "заявлена" : "нет"));
+                    manager.info("Готовность AAB: " + (result.readyForAab ? "заявлена" : "нет"));
+                    manager.fail("Реальная компиляция и упаковка " + format.name()
+                            + " ещё не реализованы. Выходной файл не создан.");
+                } catch (Exception inspectionError) {
+                    manager.fail("Ошибка проверки инструментов: " + inspectionError.toString());
+                }
             }
         } catch (Exception exception) {
-            if (manager.getState() == CodeBoxBuildManager.State.RUNNING) {
+            if (manager != null && manager.getState() == CodeBoxBuildManager.State.RUNNING) {
                 manager.fail("Ошибка подготовки: " + exception.toString());
             }
-            Toast.makeText(this, exception.toString(), Toast.LENGTH_LONG).show();
+            toast(exception.toString());
         }
         refreshReport();
     }
@@ -177,7 +176,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 + manager.getErrorCount() + "  |  Предупреждений: "
                 + manager.getWarningCount());
         reportView.setText(state == CodeBoxBuildManager.State.IDLE
-                ? "Выберите APK или AAB. Пока доступна только диагностика: реальные файлы не создаются."
+                ? "Выберите APK или AAB. Сейчас доступна диагностика инструментов; файлы не создаются."
                 : manager.getReport());
     }
 
@@ -204,26 +203,28 @@ public final class CodeBoxBuildActivity extends Activity {
             toast("Сначала запустите диагностику");
             return;
         }
-        // Share the full report as text without exposing a private file:// URI.
-        // Sharing an actual TXT attachment will be added later via FileProvider.
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
         send.putExtra(Intent.EXTRA_SUBJECT, "CodeBox 5 — журнал " + projectName);
         send.putExtra(Intent.EXTRA_TEXT, manager.getReport());
-        startActivity(Intent.createChooser(send, "Отправить журнал сборки"));
+        try {
+            startActivity(Intent.createChooser(send, "Отправить журнал сборки"));
+        } catch (Exception exception) {
+            showError(exception);
+        }
     }
 
-    private TextView label(String text, int sp, int color, boolean bold) {
+    private TextView label(String value, int sp, int color, boolean bold) {
         TextView view = new TextView(this);
-        view.setText(text);
+        view.setText(value);
         view.setTextSize(sp);
         view.setTextColor(color);
         if (bold) view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return view;
     }
 
-    private TextView actionButton(String text, int color) {
-        TextView view = label(text, 14, Color.WHITE, true);
+    private TextView actionButton(String value, int color) {
+        TextView view = label(value, 14, Color.WHITE, true);
         view.setGravity(Gravity.CENTER);
         view.setSingleLine(true);
         view.setEllipsize(TextUtils.TruncateAt.END);

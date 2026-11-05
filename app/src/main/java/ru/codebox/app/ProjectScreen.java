@@ -159,7 +159,7 @@ public final class ProjectScreen {
         back.setGravity(Gravity.CENTER);
 
         back.setBackground(
-                rounded(0x337FFFFFF, 16)
+                rounded(0x33FFFFFF, 16)
         );
 
         header.addView(
@@ -229,7 +229,7 @@ public final class ProjectScreen {
         projectIcon.setGravity(Gravity.CENTER);
 
         projectIcon.setBackground(
-                rounded(0x337FFFFFF, 16)
+                rounded(0x33FFFFFF, 16)
         );
 
         header.addView(

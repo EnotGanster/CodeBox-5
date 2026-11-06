@@ -12,10 +12,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
- * Compiles Android resources and links a binary resource APK using local AAPT2.
- * Does not add DEX or sign the final APK. Call on a background thread.
+ * CodeBox 5 local AAPT2 resource compiler.
+ * APK mode produces a binary resource APK; bundle mode produces a protobuf APK
+ * for later conversion into a base module. Run on a background thread.
  */
 public final class CodeBoxAapt2Compiler {
     private static final long TIMEOUT_SECONDS = 60;
@@ -37,10 +40,27 @@ public final class CodeBoxAapt2Compiler {
         }
     }
 
+    /** Existing APK entry point: unchanged signature and binary resource format. */
     public static Result compile(Context context, File projectDirectory,
                                  File manifestFile, String projectName) {
+        return compileInternal(context, projectDirectory, manifestFile, projectName, false);
+    }
+
+    /**
+     * Produces a protobuf-format resource APK for a future AAB base module.
+     * The returned resourceApk is NOT an AAB and must not be renamed to .aab.
+     */
+    public static Result compileForBundle(Context context, File projectDirectory,
+                                          File manifestFile, String projectName) {
+        return compileInternal(context, projectDirectory, manifestFile, projectName, true);
+    }
+
+    private static Result compileInternal(Context context, File projectDirectory,
+                                          File manifestFile, String projectName,
+                                          boolean bundleMode) {
         StringBuilder log = new StringBuilder();
         log.append("CodeBox 5 - AAPT2 Resource Compiler\n");
+        log.append("Mode: ").append(bundleMode ? "AAB PROTO" : "APK BINARY").append('\n');
         log.append("Android API: ").append(Build.VERSION.SDK_INT).append('\n');
 
         try {
@@ -70,11 +90,13 @@ public final class CodeBoxAapt2Compiler {
                 throw new IOException("android.jar отсутствует");
             }
 
-            File outputRoot = new File(context.getCacheDir(),
-                    "aapt2-output-" + projectName).getCanonicalFile();
+            // Separate caches prevent APK and AAB builds from deleting each other's files.
+            String cacheName = (bundleMode ? "aapt2-bundle-output-" : "aapt2-output-")
+                    + projectName;
+            File outputRoot = new File(context.getCacheDir(), cacheName).getCanonicalFile();
             File compiledResources = new File(outputRoot, "compiled");
-            File resourceApk = new File(outputRoot, "resources-unsigned.apk");
-            // Only delete the dedicated build cache directory, never project files.
+            File resourceApk = new File(outputRoot,
+                    bundleMode ? "resources-proto.apk" : "resources-unsigned.apk");
             File cacheRoot = context.getCacheDir().getCanonicalFile();
             if (!cacheRoot.equals(outputRoot.getParentFile())) {
                 throw new IOException("Недопустимый путь каталога сборки");
@@ -100,8 +122,6 @@ public final class CodeBoxAapt2Compiler {
             log.append("Найдено файлов ресурсов: ")
                     .append(resourceFiles.size()).append('\n');
 
-            // Compiling the resource directory as a whole preserves the Android
-            // resource folder conventions (values, layout, drawable, mipmap, etc.).
             if (!resourceFiles.isEmpty()) {
                 List<String> compileCommand = Arrays.asList(
                         aapt2.getAbsolutePath(), "compile", "--dir",
@@ -122,6 +142,7 @@ public final class CodeBoxAapt2Compiler {
             List<String> linkCommand = new ArrayList<>();
             linkCommand.add(aapt2.getAbsolutePath());
             linkCommand.add("link");
+            if (bundleMode) linkCommand.add("--proto-format");
             linkCommand.add("-o");
             linkCommand.add(resourceApk.getAbsolutePath());
             linkCommand.add("--manifest");
@@ -136,15 +157,40 @@ public final class CodeBoxAapt2Compiler {
                 linkCommand.add("-R");
                 linkCommand.add(flat.getAbsolutePath());
             }
-            log.append("\n--- AAPT2 link ---\n");
+            log.append(bundleMode ? "\n--- AAPT2 link --proto-format ---\n"
+                    : "\n--- AAPT2 link ---\n");
             runCommand(linkCommand, outputRoot, log);
             if (!resourceApk.isFile() || resourceApk.length() == 0) {
-                throw new IOException("AAPT2 link не создал ресурсный APK");
+                throw new IOException("AAPT2 link не создал ресурсный пакет");
             }
-            log.append("\nРезультат: RESOURCE_APK_CREATED\n")
+
+            if (bundleMode) {
+                // An AAPT2 protobuf APK is an intermediate artifact, not a bundle.
+                try (ZipFile zip = new ZipFile(resourceApk)) {
+                    ZipEntry manifestEntry = zip.getEntry("AndroidManifest.xml");
+                    ZipEntry resourcesEntry = zip.getEntry("resources.pb");
+                    if (manifestEntry == null || manifestEntry.isDirectory()
+                            || manifestEntry.getSize() == 0) {
+                        throw new IOException("PROTO пакет не содержит AndroidManifest.xml");
+                    }
+                    if (resourcesEntry == null || resourcesEntry.isDirectory()
+                            || resourcesEntry.getSize() == 0) {
+                        throw new IOException("PROTO пакет не содержит resources.pb");
+                    }
+                    log.append("PROTO_MANIFEST: OK\n");
+                    log.append("RESOURCES_PB: OK\n");
+                }
+            }
+
+            log.append(bundleMode ? "\nРезультат: PROTO_RESOURCE_APK_CREATED\n"
+                    : "\nРезультат: RESOURCE_APK_CREATED\n")
                     .append("Файл: ").append(resourceApk.getAbsolutePath()).append('\n')
-                    .append("Размер: ").append(resourceApk.length()).append(" байт\n")
-                    .append("APK пока не содержит classes.dex и не подписан.\n");
+                    .append("Размер: ").append(resourceApk.length()).append(" байт\n");
+            if (bundleMode) {
+                log.append("Это промежуточный protobuf APK, не готовый AAB.\n");
+            } else {
+                log.append("APK пока не содержит classes.dex и не подписан.\n");
+            }
             return new Result(true, resourceApk, log.toString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

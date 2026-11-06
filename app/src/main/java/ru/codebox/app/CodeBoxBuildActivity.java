@@ -19,6 +19,7 @@ import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +31,7 @@ import java.util.Locale;
 public final class CodeBoxBuildActivity extends Activity {
     private static final int PICK_TOOLCHAIN_ZIP = 7124;
     private static final int PICK_ANDROID_JAR = 7125;
+    private static final int SAVE_BUILT_APK = 7126;
     private static final int MAX_CLASS_DEPTH = 40;
     private static final int MAX_CLASS_FILES = 100000;
 
@@ -39,6 +41,7 @@ public final class CodeBoxBuildActivity extends Activity {
     private TextView reportView;
     private String installationReport;
     private boolean installing;
+    private File apkPendingExport;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -133,6 +136,12 @@ public final class CodeBoxBuildActivity extends Activity {
         reportView.setTextIsSelectable(true);
         reportView.setPadding(dp(12), dp(12), dp(12), dp(12));
         scroll.addView(reportView);
+
+        TextView exportApk = actionButton("Сохранить APK", Color.rgb(47, 121, 113));
+        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(-1, dp(44));
+        exportParams.topMargin = dp(10);
+        root.addView(exportApk, exportParams);
+        exportApk.setOnClickListener(v -> requestApkExport());
 
         LinearLayout tools = new LinearLayout(this);
         LinearLayout.LayoutParams toolsParams = new LinearLayout.LayoutParams(-1, -2);
@@ -441,6 +450,87 @@ public final class CodeBoxBuildActivity extends Activity {
         }
     }
 
+    private void requestApkExport() {
+        if (installing) {
+            toast("Дождитесь завершения текущей операции");
+            return;
+        }
+        if (manager.getState() != CodeBoxBuildManager.State.SUCCEEDED) {
+            toast("Сначала успешно соберите APK");
+            return;
+        }
+        File artifact = manager.getOutputFile();
+        if (artifact == null || !artifact.isFile() || artifact.length() == 0
+                || !artifact.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) {
+            toast("Готовый APK не найден. Соберите проект повторно");
+            return;
+        }
+        apkPendingExport = artifact;
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/vnd.android.package-archive");
+        intent.putExtra(Intent.EXTRA_TITLE, artifact.getName());
+        try {
+            startActivityForResult(intent, SAVE_BUILT_APK);
+        } catch (Exception e) {
+            apkPendingExport = null;
+            toast("Не удалось открыть окно сохранения: " + e.getMessage());
+        }
+    }
+
+    private void exportApk(Uri destination) {
+        final File source = apkPendingExport;
+        apkPendingExport = null;
+        if (source == null || !source.isFile() || source.length() == 0) {
+            toast("Исходный APK отсутствует. Соберите проект повторно");
+            return;
+        }
+        installing = true;
+        statusView.setText("Статус: сохранение APK...");
+        new Thread(() -> {
+            String error = null;
+            long copied = 0;
+            try (InputStream input = new java.io.FileInputStream(source);
+                 OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
+                if (output == null) throw new IOException("Не удалось открыть файл назначения");
+                byte[] buffer = new byte[32768];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, count);
+                    copied += count;
+                }
+                output.flush();
+                if (copied != source.length()) {
+                    throw new IOException("Скопировано не всё содержимое APK");
+                }
+            } catch (Exception e) {
+                error = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
+            final String failure = error;
+            final long bytes = copied;
+            runOnUiThread(() -> {
+                installing = false;
+                refreshReport();
+                if (failure == null) {
+                    new AlertDialog.Builder(this)
+                            .setTitle("APK сохранён")
+                            .setMessage("Файл: " + source.getName()
+                                    + "\nРазмер: " + bytes + " байт"
+                                    + "\n\nТеперь можно открыть его через файловый менеджер "
+                                    + "и попробовать установить на Android.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                } else {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Ошибка сохранения APK")
+                            .setMessage(failure)
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+            });
+        }, "CodeBoxApkExport").start();
+    }
+
     private void requestAndroidJar() {
         if (installing) return;
         new AlertDialog.Builder(this)
@@ -518,6 +608,14 @@ public final class CodeBoxBuildActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SAVE_BUILT_APK) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                if (!installing) exportApk(data.getData());
+            } else {
+                apkPendingExport = null;
+            }
+            return;
+        }
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         if (installing) {
             toast("Дождитесь завершения текущей операции");
@@ -699,4 +797,4 @@ public final class CodeBoxBuildActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
-}
+                            }

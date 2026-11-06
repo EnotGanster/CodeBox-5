@@ -4,20 +4,25 @@ import android.content.Context;
 
 import com.android.bundle.Config.BundleConfig;
 import com.android.tools.build.bundletool.commands.BuildBundleCommand;
+import com.google.common.collect.ImmutableList;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Creates an unsigned Android App Bundle from a prepared base module.
+ * CodeBox 5 - Bundletool Compiler.
+ *
+ * Creates an unsigned Android App Bundle from
+ * a prepared base module ZIP.
  *
  * Requires:
- * com.android.tools.build:bundletool:1.18.2
+ * bundletool 1.18.2
+ * protobuf-java
+ * guava
  *
  * Run on a background thread.
  */
@@ -30,6 +35,7 @@ public final class CodeBoxBundletoolCompiler {
     }
 
     public static final class Result {
+
         public final boolean built;
         public final File aabFile;
         public final String report;
@@ -53,6 +59,8 @@ public final class CodeBoxBundletoolCompiler {
         StringBuilder log = new StringBuilder(
                 "CodeBox 5 - Bundletool Compiler\n"
         );
+
+        File output = null;
 
         try {
             if (context == null) {
@@ -94,7 +102,7 @@ public final class CodeBoxBundletoolCompiler {
                 );
             }
 
-            File output = new File(
+            output = new File(
                     outputDir,
                     projectName + "-unsigned.aab"
             );
@@ -120,20 +128,18 @@ public final class CodeBoxBundletoolCompiler {
             Path modulePath = moduleZip.toPath();
             Path outputPath = output.toPath();
 
-            // Minimal BundleConfig. Bundletool supplies defaults
-            // for configuration fields not explicitly set.
             BundleConfig config =
                     BundleConfig.newBuilder()
                             .build();
 
-            log.append("\n--- Bundletool build-bundle ---\n");
+            log.append(
+                    "\n--- Bundletool build-bundle ---\n"
+            );
 
             BuildBundleCommand command =
                     BuildBundleCommand.builder()
                             .setModulesPaths(
-                                    Collections.singletonList(
-                                            modulePath
-                                    )
+                                    ImmutableList.of(modulePath)
                             )
                             .setOutputPath(outputPath)
                             .setBundleConfig(config)
@@ -148,9 +154,12 @@ public final class CodeBoxBundletoolCompiler {
                 );
             }
 
-            log.append("Bundletool: завершён\n");
+            log.append(
+                    "Bundletool: завершён успешно\n"
+            );
 
             try (ZipFile zip = new ZipFile(output)) {
+
                 requireEntry(
                         zip,
                         "BundleConfig.pb"
@@ -172,9 +181,13 @@ public final class CodeBoxBundletoolCompiler {
                 );
             }
 
-            log.append("Проверка структуры: OK\n");
+            log.append(
+                    "Проверка структуры AAB: OK\n"
+            );
 
-            log.append("Результат: UNSIGNED_AAB_CREATED\n");
+            log.append(
+                    "Результат: UNSIGNED_AAB_CREATED\n"
+            );
 
             log.append("AAB: ")
                     .append(output.getAbsolutePath())
@@ -185,7 +198,10 @@ public final class CodeBoxBundletoolCompiler {
                     .append(" байт\n");
 
             log.append(
-                    "AAB ещё не подписан. " +
+                    "AAB ещё не подписан.\n"
+            );
+
+            log.append(
                     "Для публикации потребуется JAR-подпись.\n"
             );
 
@@ -196,7 +212,14 @@ public final class CodeBoxBundletoolCompiler {
             );
 
         } catch (Throwable error) {
-            log.append("\nРезультат: FAILED\n");
+
+            if (output != null && output.exists()) {
+                output.delete();
+            }
+
+            log.append(
+                    "\nРезультат: FAILED\n"
+            );
 
             log.append("Ошибка: ")
                     .append(error.getClass().getName())
@@ -216,14 +239,16 @@ public final class CodeBoxBundletoolCompiler {
             ZipFile zip,
             String name
     ) throws IOException {
+
         ZipEntry entry = zip.getEntry(name);
 
         if (entry == null ||
                 entry.isDirectory() ||
                 entry.getSize() <= 0) {
+
             throw new IOException(
-                    "В AAB отсутствует обязательный файл: " +
-                    name
+                    "В AAB отсутствует обязательный файл: "
+                            + name
             );
         }
     }

@@ -27,18 +27,22 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * CodeBox 5 build screen.
+ * CodeBox 5 - Local Build Screen.
  *
- * Runs ECJ in a background thread.
- * Supports importing a standalone Android SDK android.jar.
- * Supports verified toolchain ZIP installation.
+ * ECJ Java compilation and CLASS verification.
+ * Android SDK installation.
+ * Toolchain ZIP installation.
+ * Build diagnostics and log sharing.
  *
- * APK/AAB packaging is not implemented yet.
+ * D8, APK packaging and signing are not yet connected.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
     private static final int PICK_TOOLCHAIN_ZIP = 7124;
     private static final int PICK_ANDROID_JAR = 7125;
+
+    private static final int MAX_CLASS_DEPTH = 40;
+    private static final int MAX_CLASS_FILES = 100000;
 
     private CodeBoxBuildManager manager;
     private String projectName;
@@ -54,7 +58,9 @@ public final class CodeBoxBuildActivity extends Activity {
         projectName = getIntent().getStringExtra("project_name");
 
         if (projectName == null ||
-                !projectName.matches("[A-Za-z][A-Za-z0-9_]{0,49}")) {
+                !projectName.matches(
+                        "[A-Za-z][A-Za-z0-9_]{0,49}"
+                )) {
             fatal("Не передано корректное имя проекта");
             return;
         }
@@ -75,7 +81,10 @@ public final class CodeBoxBuildActivity extends Activity {
                 .setTitle("Ошибка")
                 .setMessage(message)
                 .setCancelable(false)
-                .setPositiveButton("Закрыть", (d, w) -> finish())
+                .setPositiveButton(
+                        "Закрыть",
+                        (d, w) -> finish()
+                )
                 .show();
     }
 
@@ -87,11 +96,15 @@ public final class CodeBoxBuildActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(20), dp(16), dp(12));
+        root.setPadding(
+                dp(16), dp(20), dp(16), dp(12)
+        );
         root.setBackgroundColor(background);
         setContentView(root);
 
-        root.addView(label("Сборка проекта", 23, white, true));
+        root.addView(
+                label("Сборка проекта", 23, white, true)
+        );
 
         TextView subtitle = label(
                 projectName + "  •  Локально, без интернета",
@@ -100,18 +113,25 @@ public final class CodeBoxBuildActivity extends Activity {
 
         LinearLayout.LayoutParams subtitleParams =
                 new LinearLayout.LayoutParams(-1, -2);
+
         subtitleParams.topMargin = dp(5);
         subtitleParams.bottomMargin = dp(13);
         root.addView(subtitle, subtitleParams);
 
-        statusView = label("Ожидание", 13, muted, true);
-        statusView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        statusView = label(
+                "Ожидание", 13, muted, true
+        );
+        statusView.setPadding(
+                dp(12), dp(10), dp(12), dp(10)
+        );
         statusView.setBackground(shape(panel, 12));
         root.addView(statusView);
 
         LinearLayout builds = new LinearLayout(this);
+
         LinearLayout.LayoutParams buildsParams =
                 new LinearLayout.LayoutParams(-1, -2);
+
         buildsParams.topMargin = dp(10);
         root.addView(builds, buildsParams);
 
@@ -119,7 +139,9 @@ public final class CodeBoxBuildActivity extends Activity {
                 builds,
                 "Собрать APK",
                 Color.rgb(107, 73, 218),
-                () -> requestBuild(CodeBoxBuildManager.OutputFormat.APK),
+                () -> requestBuild(
+                        CodeBoxBuildManager.OutputFormat.APK
+                ),
                 true
         );
 
@@ -127,7 +149,9 @@ public final class CodeBoxBuildActivity extends Activity {
                 builds,
                 "Собрать AAB",
                 Color.rgb(37, 111, 192),
-                () -> requestBuild(CodeBoxBuildManager.OutputFormat.AAB),
+                () -> requestBuild(
+                        CodeBoxBuildManager.OutputFormat.AAB
+                ),
                 false
         );
 
@@ -137,7 +161,10 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams jarParams =
-                new LinearLayout.LayoutParams(-1, dp(44));
+                new LinearLayout.LayoutParams(
+                        -1, dp(44)
+                );
+
         jarParams.topMargin = dp(10);
         root.addView(androidJarButton, jarParams);
 
@@ -155,7 +182,10 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams installParams =
-                new LinearLayout.LayoutParams(-1, dp(44));
+                new LinearLayout.LayoutParams(
+                        -1, dp(44)
+                );
+
         installParams.topMargin = dp(8);
         root.addView(install, installParams);
 
@@ -173,6 +203,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         LinearLayout.LayoutParams headingParams =
                 new LinearLayout.LayoutParams(-1, -2);
+
         headingParams.topMargin = dp(15);
         headingParams.bottomMargin = dp(8);
         root.addView(heading, headingParams);
@@ -180,6 +211,7 @@ public final class CodeBoxBuildActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackground(shape(panel, 12));
+
         root.addView(
                 scroll,
                 new LinearLayout.LayoutParams(-1, 0, 1)
@@ -189,16 +221,21 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Журнал появится после проверки.",
                 12, muted, false
         );
+
         reportView.setTypeface(Typeface.MONOSPACE);
         reportView.setTextIsSelectable(true);
+
         reportView.setPadding(
                 dp(12), dp(12), dp(12), dp(12)
         );
+
         scroll.addView(reportView);
 
         LinearLayout tools = new LinearLayout(this);
+
         LinearLayout.LayoutParams toolsParams =
                 new LinearLayout.LayoutParams(-1, -2);
+
         toolsParams.topMargin = dp(10);
         root.addView(tools, toolsParams);
 
@@ -229,7 +266,9 @@ public final class CodeBoxBuildActivity extends Activity {
         TextView button = actionButton(name, color);
 
         LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(0, dp(45), 1);
+                new LinearLayout.LayoutParams(
+                        0, dp(45), 1
+                );
 
         if (first) {
             params.rightMargin = dp(5);
@@ -244,6 +283,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 toast("Дождитесь завершения текущей операции");
                 return;
             }
+
             action.run();
         });
     }
@@ -257,11 +297,16 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle("Локальная сборка " + format.name())
+                .setTitle(
+                        "Локальная сборка " + format.name()
+                )
                 .setMessage(
-                        "Запустим ECJ и запишем ошибки Java-компиляции. "
-                        + "Для Android-кода необходим build-tools/android.jar. "
-                        + "Упаковка и подпись APK/AAB пока не подключены."
+                        "Запустим ECJ, проверим Java-классы "
+                        + "и найдём MainActivity.class.\n\n"
+                        + "Для Android-кода необходим "
+                        + "build-tools/android.jar.\n\n"
+                        + "D8, упаковка и подпись APK/AAB "
+                        + "пока не подключены."
                 )
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton(
@@ -283,10 +328,12 @@ public final class CodeBoxBuildActivity extends Activity {
         installationReport = null;
 
         statusView.setText(
-                "Статус: проверка Java в фоновом потоке..."
+                "Статус: компиляция и проверка CLASS..."
         );
+
         reportView.setText(
-                "Проверяем проект и запускаем ECJ. Подождите..."
+                "Проверяем проект и запускаем ECJ. "
+                + "Подождите..."
         );
 
         new Thread(() -> {
@@ -303,11 +350,13 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectsRoot, projectName
                 ).getCanonicalFile();
 
-                if (!projectsRoot.equals(project.getParentFile())
-                        || !project.isDirectory()) {
+                if (!projectsRoot.equals(
+                        project.getParentFile()
+                ) || !project.isDirectory()) {
 
                     manager.fail(
-                            "Папка проекта не найдена или путь недопустим"
+                            "Папка проекта не найдена "
+                            + "или путь недопустим"
                     );
 
                 } else {
@@ -317,10 +366,13 @@ public final class CodeBoxBuildActivity extends Activity {
                     );
 
                     manager.info(
-                            "Формат результата: " + format.name()
+                            "Формат результата: "
+                            + format.name()
                     );
 
-                    manager.setStage("Проверка инструментов");
+                    manager.setStage(
+                            "Проверка инструментов"
+                    );
 
                     CodeBoxToolchainInspector.Result tools =
                             CodeBoxToolchainInspector.inspect(
@@ -331,12 +383,14 @@ public final class CodeBoxBuildActivity extends Activity {
 
                     manager.info(
                             "Готовность APK: "
-                            + (tools.readyForApk ? "да" : "нет")
+                            + (tools.readyForApk
+                                    ? "да" : "нет")
                     );
 
                     manager.info(
                             "Готовность AAB: "
-                            + (tools.readyForAab ? "да" : "нет")
+                            + (tools.readyForAab
+                                    ? "да" : "нет")
                     );
 
                     manager.setStage("Подготовка Java");
@@ -349,7 +403,9 @@ public final class CodeBoxBuildActivity extends Activity {
 
                     manager.info(preparation.report);
 
-                    manager.setStage("Компиляция Java (ECJ)");
+                    manager.setStage(
+                            "Компиляция Java (ECJ)"
+                    );
 
                     CodeBoxEcjCompiler.Result compiled =
                             CodeBoxEcjCompiler.compile(
@@ -366,17 +422,15 @@ public final class CodeBoxBuildActivity extends Activity {
                         );
                     } else {
                         manager.info(
-                                "Java успешно скомпилирована. Каталог: "
+                                "Java успешно скомпилирована. "
+                                + "Каталог: "
                                 + compiled.classesDirectory
                                         .getAbsolutePath()
                         );
 
-                        manager.fail(
-                                "Java-классы созданы, но D8, "
-                                + "упаковка и подпись "
-                                + format.name()
-                                + " пока не подключены. "
-                                + "APK/AAB не создан."
+                        verifyClassFiles(
+                                compiled.classesDirectory,
+                                format
                         );
                     }
                 }
@@ -398,48 +452,212 @@ public final class CodeBoxBuildActivity extends Activity {
         }, "CodeBoxEcjBuild").start();
     }
 
+    /**
+     * Verify ECJ output before connecting D8.
+     */
+    private void verifyClassFiles(
+            File classesDirectory,
+            CodeBoxBuildManager.OutputFormat format
+    ) throws IOException {
+
+        manager.setStage("Проверка CLASS");
+
+        if (classesDirectory == null
+                || !classesDirectory.isDirectory()) {
+
+            manager.fail(
+                    "Каталог CLASS файлов не существует"
+            );
+            return;
+        }
+
+        File root = classesDirectory.getCanonicalFile();
+
+        manager.info(
+                "Каталог CLASS: "
+                + root.getAbsolutePath()
+        );
+
+        ClassScan scan = new ClassScan();
+
+        scanClassFiles(root, root, scan, 0);
+
+        manager.info(
+                "Найдено CLASS файлов: "
+                + scan.count
+        );
+
+        if (scan.count == 0) {
+            manager.fail(
+                    "ECJ сообщил об успехе, "
+                    + "но CLASS файлы отсутствуют."
+            );
+            return;
+        }
+
+        manager.info(
+                "CLASS файлы созданы успешно."
+        );
+
+        if (scan.mainActivity != null) {
+            manager.info(
+                    "MainActivity.class: OK"
+            );
+
+            manager.info(
+                    "Путь: "
+                    + scan.mainActivity.getAbsolutePath()
+            );
+
+            manager.info(
+                    "Размер: "
+                    + scan.mainActivity.length()
+                    + " байт"
+            );
+        } else {
+            manager.warning(
+                    "MainActivity.class не найден. "
+                    + "Возможно, главный класс "
+                    + "имеет другое имя."
+            );
+        }
+
+        manager.info(
+                "Проверка CLASS завершена."
+        );
+
+        manager.fail(
+                "Java-классы проверены. "
+                + "D8, упаковка и подпись "
+                + format.name()
+                + " пока не подключены. "
+                + "APK/AAB не создан."
+        );
+    }
+
+    private static final class ClassScan {
+        int count;
+        File mainActivity;
+    }
+
+    /**
+     * Scan output recursively.
+     * Do not follow paths outside the output directory.
+     */
+    private static void scanClassFiles(
+            File root,
+            File directory,
+            ClassScan result,
+            int depth
+    ) throws IOException {
+
+        if (depth > MAX_CLASS_DEPTH) {
+            throw new IOException(
+                    "Превышена глубина каталогов CLASS"
+            );
+        }
+
+        File[] children = directory.listFiles();
+
+        if (children == null) {
+            throw new IOException(
+                    "Не удалось прочитать каталог CLASS: "
+                    + directory
+            );
+        }
+
+        for (File child : children) {
+            File canonical = child.getCanonicalFile();
+
+            String rootPath = root.getCanonicalPath();
+            String childPath = canonical.getCanonicalPath();
+
+            if (!childPath.startsWith(
+                    rootPath + File.separator
+            )) {
+                throw new IOException(
+                        "CLASS путь вне каталога результата"
+                );
+            }
+
+            if (canonical.isDirectory()) {
+                scanClassFiles(
+                        root,
+                        canonical,
+                        result,
+                        depth + 1
+                );
+            } else if (canonical.isFile()
+                    && canonical.getName()
+                            .endsWith(".class")) {
+
+                result.count++;
+
+                if (result.count > MAX_CLASS_FILES) {
+                    throw new IOException(
+                            "Слишком много CLASS файлов"
+                    );
+                }
+
+                if ("MainActivity.class".equals(
+                        canonical.getName()
+                )) {
+                    result.mainActivity = canonical;
+                }
+            }
+        }
+    }
+
     private void requestAndroidJar() {
         if (installing) return;
 
         new AlertDialog.Builder(this)
                 .setTitle("Установка Android API")
                 .setMessage(
-                        "Выберите настоящий android.jar из Android SDK, "
-                        + "например platforms/android-35/android.jar. "
-                        + "CodeBox проверит структуру JAR, основные "
-                        + "классы Android и рассчитает SHA-256. "
-                        + "Это не подтверждает подлинность файла. "
-                        + "Используйте только доверенный Android SDK."
+                        "Выберите настоящий android.jar "
+                        + "из Android SDK, например "
+                        + "platforms/android-35/android.jar.\n\n"
+                        + "CodeBox проверит структуру JAR, "
+                        + "основные классы Android "
+                        + "и рассчитает SHA-256.\n\n"
+                        + "Используйте только доверенный SDK."
                 )
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Выбрать android.jar", (d, w) -> {
-                    Intent intent =
-                            new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                .setPositiveButton(
+                        "Выбрать android.jar",
+                        (d, w) -> {
+                            Intent intent = new Intent(
+                                    Intent.ACTION_OPEN_DOCUMENT
+                            );
 
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("*/*");
+                            intent.addCategory(
+                                    Intent.CATEGORY_OPENABLE
+                            );
 
-                    intent.putExtra(
-                            Intent.EXTRA_MIME_TYPES,
-                            new String[]{
-                                    "application/java-archive",
-                                    "application/zip",
-                                    "application/octet-stream"
+                            intent.setType("*/*");
+
+                            intent.putExtra(
+                                    Intent.EXTRA_MIME_TYPES,
+                                    new String[]{
+                                            "application/java-archive",
+                                            "application/zip",
+                                            "application/octet-stream"
+                                    }
+                            );
+
+                            try {
+                                startActivityForResult(
+                                        intent,
+                                        PICK_ANDROID_JAR
+                                );
+                            } catch (Exception e) {
+                                toast(
+                                        "Не удалось открыть выбор файла: "
+                                        + e.getMessage()
+                                );
                             }
-                    );
-
-                    try {
-                        startActivityForResult(
-                                intent,
-                                PICK_ANDROID_JAR
-                        );
-                    } catch (Exception e) {
-                        toast(
-                                "Не удалось открыть выбор файла: "
-                                + e.getMessage()
-                        );
-                    }
-                })
+                        }
+                )
                 .show();
     }
 
@@ -452,15 +670,18 @@ public final class CodeBoxBuildActivity extends Activity {
         statusView.setText(
                 "Статус: установка android.jar..."
         );
+
         reportView.setText(
-                "Проверяем Android API и копируем файл. Подождите..."
+                "Проверяем Android API и копируем файл. "
+                + "Подождите..."
         );
 
         new Thread(() -> {
             String result;
 
             try (InputStream stream =
-                         getContentResolver().openInputStream(uri)) {
+                         getContentResolver()
+                                 .openInputStream(uri)) {
 
                 if (stream == null) {
                     throw new IOException(
@@ -481,8 +702,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         "CodeBox 5 — установка Android API\n"
                         + "Статус: FAILED\n"
                         + "Ошибка: " + e + "\n"
-                        + "Установка не завершена. "
-                        + "Проверьте выбранный файл.";
+                        + "Установка не завершена.";
             }
 
             final String report = result;
@@ -503,46 +723,50 @@ public final class CodeBoxBuildActivity extends Activity {
                 .setTitle("Установка инструментов")
                 .setMessage(
                         "Нужен заранее проверенный ZIP "
-                        + "с шестью файлами в корне: "
+                        + "с шестью файлами в корне:\n\n"
                         + "aapt2, android.jar, d8.jar, "
-                        + "ecj.jar, apksigner.jar, bundletool.jar. "
-                        + "Также потребуется доверенный SHA-256 "
-                        + "из независимого источника. "
+                        + "ecj.jar, apksigner.jar, "
+                        + "bundletool.jar.\n\n"
+                        + "Также потребуется доверенный "
+                        + "SHA-256 из независимого источника.\n\n"
                         + "Наличие файлов не означает "
-                        + "совместимость с Android. "
-                        + "Не выбирайте архив "
-                        + "из непроверенного источника."
+                        + "совместимость с Android."
                 )
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Выбрать ZIP", (d, w) -> {
-                    Intent intent =
-                            new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                .setPositiveButton(
+                        "Выбрать ZIP",
+                        (d, w) -> {
+                            Intent intent = new Intent(
+                                    Intent.ACTION_OPEN_DOCUMENT
+                            );
 
-                    intent.addCategory(
-                            Intent.CATEGORY_OPENABLE
-                    );
+                            intent.addCategory(
+                                    Intent.CATEGORY_OPENABLE
+                            );
 
-                    intent.setType("application/zip");
+                            intent.setType("application/zip");
 
-                    intent.putExtra(
-                            Intent.EXTRA_MIME_TYPES,
-                            new String[]{
-                                    "application/zip",
-                                    "application/octet-stream"
+                            intent.putExtra(
+                                    Intent.EXTRA_MIME_TYPES,
+                                    new String[]{
+                                            "application/zip",
+                                            "application/octet-stream"
+                                    }
+                            );
+
+                            try {
+                                startActivityForResult(
+                                        intent,
+                                        PICK_TOOLCHAIN_ZIP
+                                );
+                            } catch (Exception e) {
+                                toast(
+                                        "Не удалось открыть выбор файла: "
+                                        + e.getMessage()
+                                );
                             }
-                    );
-
-                    try {
-                        startActivityForResult(
-                                intent, PICK_TOOLCHAIN_ZIP
-                        );
-                    } catch (Exception e) {
-                        toast(
-                                "Не удалось открыть выбор файла: "
-                                + e.getMessage()
-                        );
-                    }
-                })
+                        }
+                )
                 .show();
     }
 
@@ -553,7 +777,9 @@ public final class CodeBoxBuildActivity extends Activity {
             Intent data
     ) {
         super.onActivityResult(
-                requestCode, resultCode, data
+                requestCode,
+                resultCode,
+                data
         );
 
         if (resultCode != RESULT_OK
@@ -580,11 +806,14 @@ public final class CodeBoxBuildActivity extends Activity {
 
         EditText hash = new EditText(this);
         hash.setSingleLine(true);
+
         hash.setInputType(
                 InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         );
+
         hash.setHint("64 символа SHA-256");
+
         hash.setPadding(
                 dp(16), dp(12), dp(16), dp(12)
         );
@@ -593,26 +822,33 @@ public final class CodeBoxBuildActivity extends Activity {
                 .setTitle("Доверенный SHA-256")
                 .setMessage(
                         "Вставьте контрольную сумму "
-                        + "из независимого доверенного источника. "
+                        + "из независимого доверенного источника.\n\n"
                         + "Не копируйте её из того же "
                         + "непроверенного архива."
                 )
                 .setView(hash)
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Установить", (d, w) -> {
-                    String expected =
-                            hash.getText().toString().trim();
+                .setPositiveButton(
+                        "Установить",
+                        (d, w) -> {
+                            String expected =
+                                    hash.getText()
+                                            .toString()
+                                            .trim();
 
-                    if (!expected.matches("(?i)[0-9a-f]{64}")) {
-                        toast(
-                                "SHA-256 должен содержать "
-                                + "64 шестнадцатеричных символа"
-                        );
-                        return;
-                    }
+                            if (!expected.matches(
+                                    "(?i)[0-9a-f]{64}"
+                            )) {
+                                toast(
+                                        "SHA-256 должен содержать "
+                                        + "64 шестнадцатеричных символа"
+                                );
+                                return;
+                            }
 
-                    installZip(uri, expected);
-                })
+                            installZip(uri, expected);
+                        }
+                )
                 .show();
     }
 
@@ -638,7 +874,8 @@ public final class CodeBoxBuildActivity extends Activity {
             String result;
 
             try (InputStream stream =
-                         getContentResolver().openInputStream(uri)) {
+                         getContentResolver()
+                                 .openInputStream(uri)) {
 
                 if (stream == null) {
                     throw new IOException(
@@ -694,12 +931,15 @@ public final class CodeBoxBuildActivity extends Activity {
 
         if (installationReport != null) {
             boolean failed =
-                    installationReport.contains("Статус: FAILED");
+                    installationReport.contains(
+                            "Статус: FAILED"
+                    );
 
             statusView.setText(
                     failed
                     ? "Установка: ошибка"
-                    : "Установка: завершена (совместимость не проверена)"
+                    : "Установка: завершена "
+                      + "(совместимость не проверена)"
             );
 
             reportView.setText(installationReport);
@@ -750,7 +990,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
         if (report == null) {
             toast(
-                    "Сначала запустите диагностику или установку"
+                    "Сначала запустите диагностику "
+                    + "или установку"
             );
             return;
         }
@@ -762,10 +1003,12 @@ public final class CodeBoxBuildActivity extends Activity {
                 file = manager.saveReport();
             } else {
                 File dir = new File(
-                        getFilesDir(), "build-logs"
+                        getFilesDir(),
+                        "build-logs"
                 );
 
-                if (!dir.isDirectory() && !dir.mkdirs()) {
+                if (!dir.isDirectory()
+                        && !dir.mkdirs()) {
                     throw new IOException(
                             "Не удалось создать каталог журналов"
                     );
@@ -824,7 +1067,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
         if (report == null) {
             toast(
-                    "Сначала запустите диагностику или установку"
+                    "Сначала запустите диагностику "
+                    + "или установку"
             );
             return;
         }
@@ -867,6 +1111,7 @@ public final class CodeBoxBuildActivity extends Activity {
             boolean bold
     ) {
         TextView view = new TextView(this);
+
         view.setText(value);
         view.setTextSize(size);
         view.setTextColor(color);
@@ -886,7 +1131,10 @@ public final class CodeBoxBuildActivity extends Activity {
             int color
     ) {
         TextView view = label(
-                value, 13, Color.WHITE, true
+                value,
+                13,
+                Color.WHITE,
+                true
         );
 
         view.setGravity(Gravity.CENTER);
@@ -911,6 +1159,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 new GradientDrawable();
 
         drawable.setColor(color);
+
         drawable.setCornerRadius(
                 dp(radiusDp)
         );

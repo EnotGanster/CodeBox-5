@@ -14,10 +14,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * Foundation for the offline CodeBox build pipeline.
- * This class records diagnostics; it does NOT compile or produce APK/AAB files.
- */
+/** Tracks local APK/AAB build state, diagnostics, and produced artifacts. */
 public final class CodeBoxBuildManager {
 
     public enum OutputFormat { APK, AAB }
@@ -81,7 +78,7 @@ public final class CodeBoxBuildManager {
         warnings = 0;
         outputFile = null;
         append(Level.INFO, "Система", "Начата локальная сборка " + format.name());
-        append(Level.INFO, "Система", "Компилятор пока не подключён");
+        append(Level.INFO, "Система", "Конвейер сборки: AAPT2, ECJ, D8; упаковка и подпись по формату результата");
     }
 
     public synchronized void setStage(String newStage) {
@@ -125,10 +122,7 @@ public final class CodeBoxBuildManager {
         append(Level.INFO, "Система", "Сборка отменена");
     }
 
-    /**
-     * Success is permitted only when a real, nonempty artifact exists.
-     * The build pipeline must verify its format and signature separately.
-     */
+    /** The caller must separately validate the artifact's format and signature. */
     public synchronized void succeed(File artifact) throws IOException {
         ensureRunning();
         if (errors != 0) {
@@ -181,7 +175,6 @@ public final class CodeBoxBuildManager {
         return result.toString();
     }
 
-    /** Saves a private UTF-8 TXT log; sharing will be added via FileProvider. */
     public synchronized File saveReport() throws IOException {
         if (state == State.IDLE) {
             throw new IOException("Журнал ещё не создан");
@@ -193,8 +186,7 @@ public final class CodeBoxBuildManager {
         Path temporary = Files.createTempFile(logsDirectory.toPath(), ".codebox-log-", ".tmp");
         try {
             Files.write(temporary, getReport().getBytes(StandardCharsets.UTF_8));
-            Files.move(temporary, destination.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temporary, destination.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(temporary);
         }

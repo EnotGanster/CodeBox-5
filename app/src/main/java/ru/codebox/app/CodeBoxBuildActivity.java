@@ -400,10 +400,7 @@ public final class CodeBoxBuildActivity extends Activity {
             manager.info("Путь: " + signed.signedApk.getAbsolutePath());
             manager.info("Размер: " + signed.signedApk.length() + " байт");
             manager.info("APK подписан и проверен apksig. Установка и запуск ещё не проверены.");
-            // CodeBoxBuildManager's success-completion API must be checked separately.
-            manager.fail("SIGNED_APK_CREATED: подпись проверена. "
-                    + "Статус SUCCESS пока не подключён к менеджеру сборки; "
-                    + "установка APK на Android ещё не проверена.");
+            manager.succeed(signed.signedApk);
         } else {
             manager.fail("ECJ и D8 завершены. Сборка AAB пока не реализована.");
         }

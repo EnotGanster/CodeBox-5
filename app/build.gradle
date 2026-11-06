@@ -40,4 +40,7 @@ dependencies {
 
     // Рабочая компиляция CLASS -> DEX.
     implementation 'com.android.tools:r8:8.7.18'
+
+    // Подпись APK и проверка подписи.
+    implementation 'com.android.tools.build:apksig:8.7.3'
 }

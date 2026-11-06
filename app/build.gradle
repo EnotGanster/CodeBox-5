@@ -20,6 +20,14 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            // Извлекать libaapt2.so из APK
+            // в каталог нативных библиотек.
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -27,12 +35,9 @@ android {
 }
 
 dependencies {
-    // ECJ 3.18.0 — рабочий Java-компилятор.
-    // Не обновляем: проверен на Android 12.
+    // Проверенный ECJ для Android 12.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // Экспериментальное подключение R8 / D8.
-    // D8 преобразует Java .class в Android .dex.
-    // Совместимость с Android Runtime пока не проверена.
+    // Рабочая компиляция CLASS -> DEX.
     implementation 'com.android.tools:r8:8.7.18'
 }

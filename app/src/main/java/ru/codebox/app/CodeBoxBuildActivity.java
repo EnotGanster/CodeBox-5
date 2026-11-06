@@ -26,7 +26,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/** CodeBox 5 local build screen: AAPT2, ECJ and D8. */
+/** CodeBox 5 local build screen: AAPT2, ECJ, D8, APK packaging and signing. */
 public final class CodeBoxBuildActivity extends Activity {
     private static final int PICK_TOOLCHAIN_ZIP = 7124;
     private static final int PICK_ANDROID_JAR = 7125;
@@ -169,7 +169,9 @@ public final class CodeBoxBuildActivity extends Activity {
                 + "и попробуем создать промежуточный APK с ресурсами.\n\n"
                 + "Необходим build-tools/android.jar.\n\n"
                 + "Подготовка манифеста пока настроена для MyApp.\n\n"
-                + "Упаковка classes.dex в APK будет выполнена. Подпись пока не подключена.";
+                + "Для APK выполним упаковку classes.dex и попробуем подписать APK. "
+                + "Ключ Android Keystore будет создан при первом запуске. "
+                + "Не удаляйте CodeBox: ключ может быть утрачен.";
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
                 .setMessage(message)
@@ -185,8 +187,8 @@ public final class CodeBoxBuildActivity extends Activity {
         }
         installing = true;
         installationReport = null;
-        statusView.setText("Статус: AAPT2, XML, ECJ + D8...");
-        reportView.setText("Проверяем AAPT2, ресурсы и Java. Подождите...");
+        statusView.setText("Статус: AAPT2, ECJ, D8, APK и подпись...");
+        reportView.setText("Выполняется локальная сборка APK. Подождите...");
 
         new Thread(() -> {
             try {
@@ -385,8 +387,23 @@ public final class CodeBoxBuildActivity extends Activity {
             manager.info("UNSIGNED_APK_CREATED: OK");
             manager.info("Путь: " + packaged.apkFile.getAbsolutePath());
             manager.info("Размер: " + packaged.apkFile.length() + " байт");
-            manager.fail("Промежуточный APK с classes.dex создан успешно. "
-                    + "Подпись APK пока не подключена, поэтому устанавливаемый APK ещё не готов.");
+            manager.setStage("Подпись APK");
+            CodeBoxApkSigner.Result signed = CodeBoxApkSigner.sign(
+                    getApplicationContext(), packaged.apkFile, projectName);
+            manager.info(signed.report);
+            if (!signed.signed || signed.signedApk == null
+                    || !signed.signedApk.isFile() || signed.signedApk.length() == 0) {
+                manager.fail("Подпись APK не удалась. См. диагностику подписывателя выше.");
+                return;
+            }
+            manager.info("SIGNED_APK_CREATED: OK");
+            manager.info("Путь: " + signed.signedApk.getAbsolutePath());
+            manager.info("Размер: " + signed.signedApk.length() + " байт");
+            manager.info("APK подписан и проверен apksig. Установка и запуск ещё не проверены.");
+            // CodeBoxBuildManager's success-completion API must be checked separately.
+            manager.fail("SIGNED_APK_CREATED: подпись проверена. "
+                    + "Статус SUCCESS пока не подключён к менеджеру сборки; "
+                    + "установка APK на Android ещё не проверена.");
         } else {
             manager.fail("ECJ и D8 завершены. Сборка AAB пока не реализована.");
         }
@@ -685,4 +702,4 @@ public final class CodeBoxBuildActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
-                        }
+}

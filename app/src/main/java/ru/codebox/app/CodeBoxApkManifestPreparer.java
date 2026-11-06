@@ -1,37 +1,36 @@
+
 package ru.codebox.app;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.xml.sax.SAXException;
+import android.util.Xml;
+
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
+import org.xmlpull.v1.XmlSerializer;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.Files;
 import java.util.regex.Pattern;
 
-import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerException;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
-
 /**
- * CodeBox 5 - APK manifest preparation.
+ * CodeBox 5 - Android manifest preparation.
  *
- * Prepares text XML for a future AAPT2 step.
- * Does not create or sign APK.
+ * Uses Android's native XML Pull Parser.
+ * Does not create binary XML or APK.
  */
 public final class CodeBoxApkManifestPreparer {
 
     private static final Pattern PACKAGE = Pattern.compile(
             "[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+"
     );
+
+    private static final String ANDROID_NS =
+            "http://schemas.android.com/apk/res/android";
+
+    private static final long MAX_XML_BYTES = 1024 * 1024;
 
     private CodeBoxApkManifestPreparer() { }
 
@@ -68,6 +67,10 @@ public final class CodeBoxApkManifestPreparer {
 
         File project = projectDirectory.getCanonicalFile();
 
+        if (!project.isDirectory()) {
+            throw new IOException("Каталог проекта отсутствует");
+        }
+
         File source = new File(
                 project,
                 "app/src/main/AndroidManifest.xml"
@@ -76,13 +79,14 @@ public final class CodeBoxApkManifestPreparer {
         if (!source.toPath().startsWith(project.toPath())
                 || !source.isFile()) {
             throw new IOException(
-                    "AndroidManifest.xml не найден в проекте"
+                    "AndroidManifest.xml не найден"
             );
         }
 
-        if (source.length() > 1024 * 1024) {
+        if (source.length() == 0
+                || source.length() > MAX_XML_BYTES) {
             throw new IOException(
-                    "AndroidManifest.xml превышает 1 МиБ"
+                    "Недопустимый размер AndroidManifest.xml"
             );
         }
 
@@ -90,13 +94,13 @@ public final class CodeBoxApkManifestPreparer {
 
         if (work.toPath().startsWith(project.toPath())) {
             throw new IOException(
-                    "Рабочая папка должна находиться вне проекта"
+                    "Рабочий каталог должен быть вне проекта"
             );
         }
 
         if (!work.isDirectory() && !work.mkdirs()) {
             throw new IOException(
-                    "Не удалось создать рабочую папку"
+                    "Не удалось создать рабочий каталог"
             );
         }
 
@@ -105,130 +109,220 @@ public final class CodeBoxApkManifestPreparer {
                 "AndroidManifest.xml"
         ).getCanonicalFile();
 
-        if (!output.getParentFile().equals(work)) {
+        if (!work.equals(output.getParentFile())) {
+            throw new IOException("Недопустимый выходной путь");
+        }
+
+        File temporary = new File(
+                work,
+                "AndroidManifest.xml.tmp"
+        ).getCanonicalFile();
+
+        if (!work.equals(temporary.getParentFile())) {
+            throw new IOException("Недопустимый временный путь");
+        }
+
+        if (temporary.exists() && !temporary.delete()) {
             throw new IOException(
-                    "Недопустимый выходной путь"
+                    "Не удалось очистить временный файл"
             );
         }
 
+        boolean completed = false;
+
         try {
-            DocumentBuilderFactory factory =
-                    DocumentBuilderFactory.newInstance();
+            XmlPullParser parser = Xml.newPullParser();
 
-            factory.setNamespaceAware(true);
-
-            factory.setFeature(
-                    "http://apache.org/xml/features/disallow-doctype-decl",
+            parser.setFeature(
+                    XmlPullParser.FEATURE_PROCESS_NAMESPACES,
                     true
             );
 
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-general-entities",
-                    false
-            );
+            XmlSerializer serializer = Xml.newSerializer();
 
-            factory.setFeature(
-                    "http://xml.org/sax/features/external-parameter-entities",
-                    false
-            );
+            try (InputStream input = new FileInputStream(source);
+                 OutputStream stream = new FileOutputStream(temporary)) {
 
-            factory.setFeature(
-                    XMLConstants.FEATURE_SECURE_PROCESSING,
-                    true
-            );
+                parser.setInput(input, "UTF-8");
+                serializer.setOutput(stream, "UTF-8");
+                serializer.startDocument("UTF-8", true);
 
-            factory.setXIncludeAware(false);
-            factory.setExpandEntityReferences(false);
+                int event = parser.getEventType();
+                int depth = 0;
+                boolean rootFound = false;
+                boolean applicationFound = false;
 
-            Document document;
+                while (event != XmlPullParser.END_DOCUMENT) {
 
-            try (InputStream input =
-                         Files.newInputStream(source.toPath())) {
-                document = factory.newDocumentBuilder().parse(input);
+                    if (event == XmlPullParser.DOCDECL) {
+                        throw new IOException(
+                                "DOCTYPE запрещён в AndroidManifest.xml"
+                        );
+                    }
+
+                    if (event == XmlPullParser.START_TAG) {
+                        String name = parser.getName();
+                        String namespace = parser.getNamespace();
+
+                        if (depth == 0) {
+                            if (!"manifest".equals(name)) {
+                                throw new IOException(
+                                        "Корневой элемент должен быть manifest"
+                                );
+                            }
+                            rootFound = true;
+
+                            String existing =
+                                    parser.getAttributeValue(null, "package");
+
+                            if (existing != null
+                                    && !existing.isEmpty()
+                                    && !applicationId.equals(existing)) {
+                                throw new IOException(
+                                        "package не совпадает с applicationId: "
+                                        + existing
+                                );
+                            }
+                        }
+
+                        if (depth == 1
+                                && "application".equals(name)) {
+                            applicationFound = true;
+                        }
+
+                        for (int i = 0;
+                             i < parser.getNamespaceCount(depth + 1);
+                             i++) {
+
+                            if (i < parser.getNamespaceCount(depth)) {
+                                continue;
+                            }
+
+                            String prefix = parser.getNamespacePrefix(i);
+                            String uri = parser.getNamespaceUri(i);
+
+                            serializer.setPrefix(
+                                    prefix == null ? "" : prefix,
+                                    uri == null ? "" : uri
+                            );
+                        }
+
+                        serializer.startTag(
+                                namespace == null ? "" : namespace,
+                                name
+                        );
+
+                        for (int i = 0;
+                             i < parser.getAttributeCount();
+                             i++) {
+
+                            String attrName = parser.getAttributeName(i);
+                            String attrNamespace =
+                                    parser.getAttributeNamespace(i);
+
+                            if (depth == 0
+                                    && "package".equals(attrName)
+                                    && (attrNamespace == null
+                                    || attrNamespace.isEmpty())) {
+                                continue;
+                            }
+
+                            serializer.attribute(
+                                    attrNamespace == null
+                                            ? "" : attrNamespace,
+                                    attrName,
+                                    parser.getAttributeValue(i)
+                            );
+                        }
+
+                        if (depth == 0) {
+                            serializer.attribute(
+                                    "",
+                                    "package",
+                                    applicationId
+                            );
+                        }
+
+                        depth++;
+
+                    } else if (event == XmlPullParser.END_TAG) {
+
+                        depth--;
+
+                        serializer.endTag(
+                                parser.getNamespace() == null
+                                        ? "" : parser.getNamespace(),
+                                parser.getName()
+                        );
+
+                    } else if (event == XmlPullParser.TEXT) {
+
+                        serializer.text(parser.getText());
+
+                    } else if (event == XmlPullParser.CDSECT) {
+
+                        serializer.cdsect(parser.getText());
+
+                    } else if (event == XmlPullParser.ENTITY_REF) {
+
+                        throw new IOException(
+                                "XML-сущности не поддерживаются"
+                        );
+                    }
+
+                    event = parser.nextToken();
+                }
+
+                if (!rootFound || !applicationFound || depth != 0) {
+                    throw new IOException(
+                            "Неполная структура AndroidManifest.xml"
+                    );
+                }
+
+                serializer.endDocument();
+                serializer.flush();
             }
 
-            Element manifest = document.getDocumentElement();
-
-            if (manifest == null
-                    || !"manifest".equals(manifest.getTagName())) {
+            if (!temporary.isFile()
+                    || temporary.length() == 0) {
                 throw new IOException(
-                        "Корневой элемент XML должен быть manifest"
+                        "Подготовленный XML пуст"
                 );
             }
 
-            String existing =
-                    manifest.getAttribute("package").trim();
-
-            if (!existing.isEmpty()
-                    && !applicationId.equals(existing)) {
+            if (output.exists() && !output.delete()) {
                 throw new IOException(
-                        "package не совпадает с applicationId: "
-                        + existing
+                        "Не удалось заменить прежний XML"
                 );
             }
 
-            manifest.setAttribute("package", applicationId);
-
-            TransformerFactory transformers =
-                    TransformerFactory.newInstance();
-
-            transformers.setFeature(
-                    XMLConstants.FEATURE_SECURE_PROCESSING,
-                    true
-            );
-
-            // Use URI strings for Android API compatibility.
-            transformers.setAttribute(
-                    "http://javax.xml.XMLConstants/property/accessExternalDTD",
-                    ""
-            );
-
-            transformers.setAttribute(
-                    "http://javax.xml.XMLConstants/property/accessExternalStylesheet",
-                    ""
-            );
-
-            Transformer transformer =
-                    transformers.newTransformer();
-
-            transformer.setOutputProperty(
-                    OutputKeys.ENCODING,
-                    "UTF-8"
-            );
-
-            transformer.setOutputProperty(
-                    OutputKeys.INDENT,
-                    "yes"
-            );
-
-            try (OutputStream stream =
-                         Files.newOutputStream(output.toPath())) {
-
-                transformer.transform(
-                        new DOMSource(document),
-                        new StreamResult(stream)
+            if (!temporary.renameTo(output)) {
+                throw new IOException(
+                        "Не удалось сохранить подготовленный XML"
                 );
             }
+
+            completed = true;
 
             return new Result(
                     output,
                     applicationId,
-                    "Манифест подготовлен: "
-                    + output.getAbsolutePath()
-                    + "\napplicationId: "
-                    + applicationId
-                    + "\nЭто текстовый XML для AAPT2, не APK."
+                    "MANIFEST_PREPARED: OK\n"
+                    + "applicationId: " + applicationId
+                    + "\nФайл: " + output.getAbsolutePath()
+                    + "\nРазмер: " + output.length() + " байт"
+                    + "\nФормат: текстовый XML для AAPT2"
             );
 
-        } catch (ParserConfigurationException
-                 | SAXException
-                 | TransformerException e) {
-
+        } catch (XmlPullParserException e) {
             throw new IOException(
-                    "Ошибка обработки AndroidManifest.xml: "
-                    + e.getMessage(),
+                    "Ошибка XML-парсера: " + e.getMessage(),
                     e
             );
+        } finally {
+            if (!completed && temporary.exists()) {
+                temporary.delete();
+            }
         }
     }
 }

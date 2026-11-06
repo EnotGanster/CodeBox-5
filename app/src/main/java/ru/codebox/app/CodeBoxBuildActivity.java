@@ -18,20 +18,21 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.OutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/** CodeBox 5 local build screen: AAPT2, ECJ, D8, APK packaging and signing. */
+/** CodeBox 5: local APK and unsigned AAB build screen. */
 public final class CodeBoxBuildActivity extends Activity {
     private static final int PICK_TOOLCHAIN_ZIP = 7124;
     private static final int PICK_ANDROID_JAR = 7125;
-    private static final int SAVE_BUILT_APK = 7126;
+    private static final int SAVE_BUILT_ARTIFACT = 7126;
     private static final int MAX_CLASS_DEPTH = 40;
     private static final int MAX_CLASS_FILES = 100000;
 
@@ -41,7 +42,7 @@ public final class CodeBoxBuildActivity extends Activity {
     private TextView reportView;
     private String installationReport;
     private boolean installing;
-    private File apkPendingExport;
+    private File artifactPendingExport;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -137,11 +138,11 @@ public final class CodeBoxBuildActivity extends Activity {
         reportView.setPadding(dp(12), dp(12), dp(12), dp(12));
         scroll.addView(reportView);
 
-        TextView exportApk = actionButton("Сохранить APK", Color.rgb(47, 121, 113));
+        TextView export = actionButton("Сохранить APK / AAB", Color.rgb(47, 121, 113));
         LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(-1, dp(44));
         exportParams.topMargin = dp(10);
-        root.addView(exportApk, exportParams);
-        exportApk.setOnClickListener(v -> requestApkExport());
+        root.addView(export, exportParams);
+        export.setOnClickListener(v -> requestArtifactExport());
 
         LinearLayout tools = new LinearLayout(this);
         LinearLayout.LayoutParams toolsParams = new LinearLayout.LayoutParams(-1, -2);
@@ -172,15 +173,15 @@ public final class CodeBoxBuildActivity extends Activity {
             toast("Дождитесь завершения текущей операции");
             return;
         }
-        String message = "Проверим инструменты, запустим AAPT2 version, "
-                + "подготовим манифест и выполним ECJ и D8.\n\n"
-                + "Для APK дополнительно запустим AAPT2 compile + link "
-                + "и попробуем создать промежуточный APK с ресурсами.\n\n"
-                + "Необходим build-tools/android.jar.\n\n"
-                + "Пакет приложения определяется из AndroidManifest.xml проекта.\n\n"
-                + "Для APK выполним упаковку classes.dex и попробуем подписать APK. "
-                + "Ключ Android Keystore будет создан при первом запуске. "
-                + "Не удаляйте CodeBox: ключ может быть утрачен.";
+        String message = "Проверим инструменты, подготовим AndroidManifest.xml и ресурсы "
+                + "через AAPT2, затем запустим ECJ и D8.\n\n"
+                + (format == CodeBoxBuildManager.OutputFormat.APK
+                ? "APK: упакуем classes.dex и подпишем APK ключом Android Keystore. "
+                + "Не удаляйте CodeBox: ключ может быть утрачен."
+                : "AAB: создадим protobuf-ресурсы, ZIP модуля base и запустим bundletool. "
+                + "Результат будет НЕ ПОДПИСАН и пока не готов к публикации. "
+                + "Работа bundletool на Android 12 ещё не подтверждена.")
+                + "\n\nТребуется установленный build-tools/android.jar.";
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
                 .setMessage(message)
@@ -196,8 +197,9 @@ public final class CodeBoxBuildActivity extends Activity {
         }
         installing = true;
         installationReport = null;
-        statusView.setText("Статус: AAPT2, ECJ, D8, APK и подпись...");
-        reportView.setText("Выполняется локальная сборка APK. Подождите...");
+        artifactPendingExport = null;
+        statusView.setText("Статус: сборка " + format.name() + "...");
+        reportView.setText("Выполняется локальная сборка " + format.name() + ". Подождите...");
 
         new Thread(() -> {
             try {
@@ -216,8 +218,12 @@ public final class CodeBoxBuildActivity extends Activity {
                 CodeBoxToolchainInspector.Result tools =
                         CodeBoxToolchainInspector.inspect(getApplicationContext());
                 manager.info(tools.report);
-                manager.info("Готовность APK: " + (tools.readyForApk ? "да" : "нет"));
-                manager.info("Готовность AAB: " + (tools.readyForAab ? "да" : "нет"));
+                manager.info("Готовность APK по старому инспектору: "
+                        + (tools.readyForApk ? "да" : "нет"));
+                manager.info("Готовность AAB по старому инспектору: "
+                        + (tools.readyForAab ? "да" : "нет"));
+                manager.info("Примечание: инспектор проверяет внешние JAR, а ECJ/D8/bundletool "
+                        + "подключены как зависимости приложения.");
 
                 manager.setStage("Проверка и запуск AAPT2");
                 try {
@@ -225,77 +231,81 @@ public final class CodeBoxBuildActivity extends Activity {
                             CodeBoxAapt2Inspector.inspect(getApplicationContext(), true);
                     manager.info(aapt2.report);
                     if (!aapt2.found) {
-                        manager.info("AAPT2_STATUS: NOT_FOUND");
-                        manager.warning("AAPT2 не найден. ECJ и D8 продолжат работу.");
+                        manager.warning("AAPT2 не найден.");
                     } else {
                         manager.info("AAPT2_FOUND: YES");
                         manager.info("AAPT2_ELF_VALID: " + aapt2.elfValid);
                         manager.info("AAPT2_ARCH_COMPATIBLE: " + aapt2.architectureCompatible);
                         manager.info("AAPT2_EXECUTABLE: " + aapt2.executable);
-                        manager.info("AAPT2_LAUNCH_TEST: " +
-                                (aapt2.launchSuccessful ? "OK" : "FAILED"));
-                        if (aapt2.launchSuccessful) {
-                            manager.info("AAPT2 успешно запущен на этом устройстве.");
-                        } else {
-                            manager.warning("AAPT2 не прошёл тест запуска. ECJ и D8 продолжат работу.");
-                        }
+                        manager.info("AAPT2_LAUNCH_TEST: "
+                                + (aapt2.launchSuccessful ? "OK" : "FAILED"));
                     }
                 } catch (Throwable error) {
-                    manager.warning("Ошибка диагностики AAPT2: " +
-                            error.getClass().getName() + ": " + error.getMessage());
+                    manager.warning("Ошибка диагностики AAPT2: "
+                            + error.getClass().getName() + ": " + error.getMessage());
                 }
 
-                // Keep the prepared manifest reference for the AAPT2 link step.
-                File preparedManifest = null;
-                File linkedResourceApk = null;
-                if (format == CodeBoxBuildManager.OutputFormat.APK) {
-                    manager.setStage("Подготовка AndroidManifest.xml");
-                    try {
-                        File manifestWork = new File(getCacheDir(), "apk-manifest-" + projectName);
-                        CodeBoxApkManifestPreparer.Result manifestResult =
-                                CodeBoxApkManifestPreparer.prepare(
-                                        project, manifestWork);
-                        manager.info(manifestResult.report);
-                        if (manifestResult.manifestFile == null
-                                || !manifestResult.manifestFile.isFile()
-                                || manifestResult.manifestFile.length() == 0) {
-                            throw new IOException("Подготовленный манифест отсутствует");
-                        }
-                        preparedManifest = manifestResult.manifestFile;
-                        manager.info("applicationId: " + manifestResult.applicationId);
-                        manager.info("MANIFEST_PREPARED: OK");
-                        manager.info("Размер XML: " + preparedManifest.length() + " байт");
-                    } catch (Exception e) {
-                        manager.fail("Ошибка подготовки манифеста: " +
-                                e.getClass().getName() + ": " + e.getMessage());
-                        return;
+                manager.setStage("Подготовка AndroidManifest.xml");
+                File preparedManifest;
+                try {
+                    File manifestWork = new File(getCacheDir(),
+                            (format == CodeBoxBuildManager.OutputFormat.APK
+                                    ? "apk-manifest-" : "aab-manifest-") + projectName);
+                    CodeBoxApkManifestPreparer.Result manifestResult =
+                            CodeBoxApkManifestPreparer.prepare(project, manifestWork);
+                    manager.info(manifestResult.report);
+                    if (manifestResult.manifestFile == null
+                            || !manifestResult.manifestFile.isFile()
+                            || manifestResult.manifestFile.length() == 0) {
+                        throw new IOException("Подготовленный манифест отсутствует");
                     }
+                    preparedManifest = manifestResult.manifestFile;
+                    manager.info("applicationId: " + manifestResult.applicationId);
+                    manager.info("MANIFEST_PREPARED: OK");
+                } catch (Exception e) {
+                    manager.fail("Ошибка подготовки манифеста: "
+                            + e.getClass().getName() + ": " + e.getMessage());
+                    return;
+                }
 
-                    // AAPT2 is experimental here. Record failures but continue ECJ/D8.
-                    manager.setStage("Компиляция ресурсов (AAPT2)");
-                    try {
+                File linkedResources;
+                manager.setStage(format == CodeBoxBuildManager.OutputFormat.APK
+                        ? "Компиляция ресурсов APK (AAPT2)"
+                        : "Компиляция protobuf ресурсов AAB (AAPT2)");
+                try {
+                    if (format == CodeBoxBuildManager.OutputFormat.APK) {
                         CodeBoxAapt2Compiler.Result resources =
-                                CodeBoxAapt2Compiler.compile(
-                                        getApplicationContext(), project,
+                                CodeBoxAapt2Compiler.compile(getApplicationContext(), project,
                                         preparedManifest, projectName);
                         manager.info(resources.report);
-                        if (resources.compiled && resources.resourceApk != null
-                                && resources.resourceApk.isFile()
-                                && resources.resourceApk.length() > 0) {
-                            linkedResourceApk = resources.resourceApk;
-                            manager.info("RESOURCE_APK_CREATED: OK");
-                            manager.info("Путь: " + resources.resourceApk.getAbsolutePath());
-                            manager.info("Размер: " + resources.resourceApk.length() + " байт");
-                            manager.info("Промежуточный APK пока без classes.dex и подписи.");
-                        } else {
-                            manager.warning("AAPT2 compile/link не создал промежуточный APK. "
-                                    + "ECJ и D8 продолжат работу.");
+                        if (!resources.compiled || resources.resourceApk == null
+                                || !resources.resourceApk.isFile()
+                                || resources.resourceApk.length() == 0) {
+                            manager.fail("AAPT2 не создал ресурсный APK.");
+                            return;
                         }
-                    } catch (Throwable error) {
-                        manager.warning("Ошибка AAPT2 compile/link: " +
-                                error.getClass().getName() + ": " + error.getMessage()
-                                + ". ECJ и D8 продолжат работу.");
+                        linkedResources = resources.resourceApk;
+                        manager.info("RESOURCE_APK_CREATED: OK");
+                    } else {
+                        CodeBoxAapt2Compiler.Result resources =
+                                CodeBoxAapt2Compiler.compileForBundle(getApplicationContext(),
+                                        project, preparedManifest, projectName);
+                        manager.info(resources.report);
+                        if (!resources.compiled || resources.resourceApk == null
+                                || !resources.resourceApk.isFile()
+                                || resources.resourceApk.length() == 0) {
+                            manager.fail("AAPT2 не создал protobuf-ресурсы для AAB.");
+                            return;
+                        }
+                        linkedResources = resources.resourceApk;
+                        manager.info("PROTO_RESOURCE_APK_CREATED: OK");
                     }
+                    manager.info("Ресурсы: " + linkedResources.getAbsolutePath());
+                    manager.info("Размер: " + linkedResources.length() + " байт");
+                } catch (Throwable error) {
+                    manager.fail("Ошибка AAPT2: " + error.getClass().getName()
+                            + ": " + error.getMessage());
+                    return;
                 }
 
                 manager.setStage("Подготовка Java");
@@ -313,7 +323,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 }
                 manager.info("Java успешно скомпилирована. Каталог: "
                         + compiled.classesDirectory.getAbsolutePath());
-                verifyClassFilesAndRunD8(compiled.classesDirectory, format, linkedResourceApk);
+                verifyClassFilesAndRunD8(compiled.classesDirectory, format, linkedResources);
             } catch (Throwable e) {
                 if (manager.getState() == CodeBoxBuildManager.State.RUNNING) {
                     manager.fail("Ошибка сборки: " + e.getClass().getName()
@@ -325,12 +335,12 @@ public final class CodeBoxBuildActivity extends Activity {
                     refreshReport();
                 });
             }
-        }, "CodeBoxAapt2EcjD8Build").start();
+        }, "CodeBoxLocalBuild").start();
     }
 
     private void verifyClassFilesAndRunD8(
             File classesDirectory, CodeBoxBuildManager.OutputFormat format,
-            File linkedResourceApk) throws IOException {
+            File linkedResources) throws IOException {
         manager.setStage("Проверка CLASS");
         if (classesDirectory == null || !classesDirectory.isDirectory()) {
             manager.fail("Каталог CLASS файлов не существует");
@@ -378,16 +388,11 @@ public final class CodeBoxBuildActivity extends Activity {
         manager.info("classes.dex: OK");
         manager.info("Путь: " + dex.dexFile.getAbsolutePath());
         manager.info("Размер: " + dex.dexFile.length() + " байт");
+
         if (format == CodeBoxBuildManager.OutputFormat.APK) {
             manager.setStage("Упаковка APK");
-            if (linkedResourceApk == null || !linkedResourceApk.isFile()
-                    || linkedResourceApk.length() == 0) {
-                manager.fail("AAPT2 не создал промежуточный APK. "
-                        + "Упаковка classes.dex невозможна.");
-                return;
-            }
             CodeBoxApkPackager.Result packaged = CodeBoxApkPackager.packageApk(
-                    getApplicationContext(), linkedResourceApk, dex.dexFile, projectName);
+                    getApplicationContext(), linkedResources, dex.dexFile, projectName);
             manager.info(packaged.report);
             if (!packaged.packaged || packaged.apkFile == null
                     || !packaged.apkFile.isFile() || packaged.apkFile.length() == 0) {
@@ -409,10 +414,31 @@ public final class CodeBoxBuildActivity extends Activity {
             manager.info("SIGNED_APK_CREATED: OK");
             manager.info("Путь: " + signed.signedApk.getAbsolutePath());
             manager.info("Размер: " + signed.signedApk.length() + " байт");
-            manager.info("APK подписан и проверен apksig. Установка и запуск ещё не проверены.");
+            manager.info("APK подписан и проверен apksig.");
             manager.succeed(signed.signedApk);
         } else {
-            manager.fail("ECJ и D8 завершены. Сборка AAB пока не реализована.");
+            manager.setStage("Подготовка модуля base (AAB)");
+            CodeBoxAabBuilder.Result base = CodeBoxAabBuilder.buildBaseModule(
+                    getApplicationContext(), linkedResources, dex.dexFile, projectName);
+            manager.info(base.report);
+            if (!base.prepared || base.moduleZip == null
+                    || !base.moduleZip.isFile() || base.moduleZip.length() == 0) {
+                manager.fail("Не удалось создать ZIP модуля base.");
+                return;
+            }
+            manager.info("BASE_MODULE_PREPARED: OK");
+            manager.setStage("Формирование AAB (bundletool)");
+            CodeBoxBundletoolCompiler.Result bundle = CodeBoxBundletoolCompiler.build(
+                    getApplicationContext(), base.moduleZip, projectName);
+            manager.info(bundle.report);
+            if (!bundle.built || bundle.aabFile == null
+                    || !bundle.aabFile.isFile() || bundle.aabFile.length() == 0) {
+                manager.fail("Bundletool не создал корректный AAB. См. диагностику выше.");
+                return;
+            }
+            manager.info("UNSIGNED_AAB_CREATED: OK");
+            manager.warning("AAB не подписан. Для публикации требуется JAR-подпись.");
+            manager.succeed(bundle.aabFile);
         }
     }
 
@@ -451,47 +477,54 @@ public final class CodeBoxBuildActivity extends Activity {
         }
     }
 
-    private void requestApkExport() {
+    private void requestArtifactExport() {
         if (installing) {
             toast("Дождитесь завершения текущей операции");
             return;
         }
         if (manager.getState() != CodeBoxBuildManager.State.SUCCEEDED) {
-            toast("Сначала успешно соберите APK");
+            toast("Сначала успешно соберите APK или AAB");
             return;
         }
         File artifact = manager.getOutputFile();
-        if (artifact == null || !artifact.isFile() || artifact.length() == 0
-                || !artifact.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) {
-            toast("Готовый APK не найден. Соберите проект повторно");
+        if (artifact == null || !artifact.isFile() || artifact.length() == 0) {
+            toast("Готовый файл не найден. Соберите проект повторно");
             return;
         }
-        apkPendingExport = artifact;
+        String lowerName = artifact.getName().toLowerCase(Locale.ROOT);
+        boolean apk = lowerName.endsWith(".apk");
+        boolean aab = lowerName.endsWith(".aab");
+        if (!apk && !aab) {
+            toast("Неизвестный формат результата");
+            return;
+        }
+        artifactPendingExport = artifact;
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/vnd.android.package-archive");
+        intent.setType(apk ? "application/vnd.android.package-archive"
+                : "application/octet-stream");
         intent.putExtra(Intent.EXTRA_TITLE, artifact.getName());
         try {
-            startActivityForResult(intent, SAVE_BUILT_APK);
+            startActivityForResult(intent, SAVE_BUILT_ARTIFACT);
         } catch (Exception e) {
-            apkPendingExport = null;
+            artifactPendingExport = null;
             toast("Не удалось открыть окно сохранения: " + e.getMessage());
         }
     }
 
-    private void exportApk(Uri destination) {
-        final File source = apkPendingExport;
-        apkPendingExport = null;
+    private void exportArtifact(Uri destination) {
+        final File source = artifactPendingExport;
+        artifactPendingExport = null;
         if (source == null || !source.isFile() || source.length() == 0) {
-            toast("Исходный APK отсутствует. Соберите проект повторно");
+            toast("Исходный файл отсутствует. Соберите проект повторно");
             return;
         }
         installing = true;
-        statusView.setText("Статус: сохранение APK...");
+        statusView.setText("Статус: сохранение " + source.getName() + "...");
         new Thread(() -> {
             String error = null;
             long copied = 0;
-            try (InputStream input = new java.io.FileInputStream(source);
+            try (InputStream input = new FileInputStream(source);
                  OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
                 if (output == null) throw new IOException("Не удалось открыть файл назначения");
                 byte[] buffer = new byte[32768];
@@ -502,7 +535,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 }
                 output.flush();
                 if (copied != source.length()) {
-                    throw new IOException("Скопировано не всё содержимое APK");
+                    throw new IOException("Скопировано не всё содержимое файла");
                 }
             } catch (Exception e) {
                 error = e.getClass().getSimpleName() + ": " + e.getMessage();
@@ -513,23 +546,25 @@ public final class CodeBoxBuildActivity extends Activity {
                 installing = false;
                 refreshReport();
                 if (failure == null) {
+                    boolean aab = source.getName().toLowerCase(Locale.ROOT).endsWith(".aab");
                     new AlertDialog.Builder(this)
-                            .setTitle("APK сохранён")
+                            .setTitle(aab ? "AAB сохранён" : "APK сохранён")
                             .setMessage("Файл: " + source.getName()
                                     + "\nРазмер: " + bytes + " байт"
-                                    + "\n\nТеперь можно открыть его через файловый менеджер "
-                                    + "и попробовать установить на Android.")
+                                    + (aab ? "\n\nAAB пока не подписан и не готов к публикации."
+                                    : "\n\nAPK можно открыть через файловый менеджер "
+                                    + "и установить на Android."))
                             .setPositiveButton("OK", null)
                             .show();
                 } else {
                     new AlertDialog.Builder(this)
-                            .setTitle("Ошибка сохранения APK")
+                            .setTitle("Ошибка сохранения")
                             .setMessage(failure)
                             .setPositiveButton("OK", null)
                             .show();
                 }
             });
-        }, "CodeBoxApkExport").start();
+        }, "CodeBoxArtifactExport").start();
     }
 
     private void requestAndroidJar() {
@@ -609,11 +644,11 @@ public final class CodeBoxBuildActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == SAVE_BUILT_APK) {
+        if (requestCode == SAVE_BUILT_ARTIFACT) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
-                if (!installing) exportApk(data.getData());
+                if (!installing) exportArtifact(data.getData());
             } else {
-                apkPendingExport = null;
+                artifactPendingExport = null;
             }
             return;
         }
@@ -692,7 +727,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 + manager.getErrorCount() + "  |  Предупреждений: "
                 + manager.getWarningCount());
         reportView.setText(state == CodeBoxBuildManager.State.IDLE
-                ? "Выберите APK или AAB для запуска диагностики. "
+                ? "Выберите APK или AAB для запуска локальной сборки. "
                 + "Если Android API отсутствует, установите доверенный android.jar."
                 : manager.getReport());
     }
@@ -798,4 +833,4 @@ public final class CodeBoxBuildActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
-                }
+                         }

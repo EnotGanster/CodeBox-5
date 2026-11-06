@@ -3,6 +3,7 @@ package ru.codebox.app;
 import android.content.Context;
 import android.os.Build;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -12,19 +13,20 @@ import java.util.concurrent.TimeUnit;
 /**
  * CodeBox 5 - AAPT2 Inspector.
  *
- * Checks:
- * - AAPT2 file presence
- * - ELF header
- * - CPU architecture
- * - executable permissions
- * - optional execution test
+ * Проверяет:
+ * - AAPT2 в nativeLibraryDir;
+ * - резервный путь files/build-tools/aapt2;
+ * - ELF и архитектуру;
+ * - права выполнения;
+ * - запуск команды version (по запросу).
  *
- * Does not compile resources or create APK.
+ * Не выполняет сборку ресурсов или APK.
  */
 public final class CodeBoxAapt2Inspector {
 
     private static final int ELF_HEADER_SIZE = 20;
     private static final long TIMEOUT_SECONDS = 5;
+    private static final int MAX_OUTPUT_BYTES = 16384;
 
     private CodeBoxAapt2Inspector() {
     }
@@ -48,8 +50,7 @@ public final class CodeBoxAapt2Inspector {
         ) {
             this.found = found;
             this.elfValid = elfValid;
-            this.architectureCompatible =
-                    architectureCompatible;
+            this.architectureCompatible = architectureCompatible;
             this.executable = executable;
             this.launchSuccessful = launchSuccessful;
             this.report = report;
@@ -57,18 +58,19 @@ public final class CodeBoxAapt2Inspector {
     }
 
     /**
-     * Performs file and architecture checks only.
-     * Does not launch the executable.
+     * Безопасная проверка без запуска AAPT2.
      */
     public static Result inspect(Context context) {
         return inspect(context, false);
     }
 
     /**
-     * Set testLaunch=true to attempt "aapt2 version".
+     * При testLaunch=true выполняет команду:
      *
-     * Call from a background thread when testLaunch=true.
-     * Only run trusted AAPT2 binaries.
+     * libaapt2.so version
+     *
+     * Вызывать из фонового потока.
+     * Запускать только проверенный бинарник.
      */
     public static Result inspect(
             Context context,
@@ -90,41 +92,80 @@ public final class CodeBoxAapt2Inspector {
         if (context == null) {
             log.append("ERROR: Context отсутствует\n");
 
-            return new Result(
+            return result(
                     false, false, false,
-                    false, false, log.toString()
+                    false, false, log
             );
         }
 
-        File toolDirectory = new File(
-                context.getFilesDir(),
-                "build-tools"
-        );
+        File nativeBinary = null;
 
-        File aapt2 = new File(
-                toolDirectory,
+        String nativeDirectory =
+                context.getApplicationInfo().nativeLibraryDir;
+
+        log.append("\nКаталог nativeLibraryDir:\n")
+                .append(nativeDirectory)
+                .append('\n');
+
+        if (nativeDirectory != null
+                && !nativeDirectory.isEmpty()) {
+
+            nativeBinary = new File(
+                    nativeDirectory,
+                    "libaapt2.so"
+            );
+        }
+
+        File legacyBinary = new File(
+                new File(
+                        context.getFilesDir(),
+                        "build-tools"
+                ),
                 "aapt2"
         );
 
-        log.append("\nКаталог инструментов:\n");
-        log.append(toolDirectory.getAbsolutePath());
-        log.append('\n');
+        log.append("Ожидаемый нативный файл:\n")
+                .append(
+                        nativeBinary == null
+                                ? "UNAVAILABLE"
+                                : nativeBinary.getAbsolutePath()
+                )
+                .append('\n');
 
-        if (!aapt2.isFile()) {
+        log.append("Резервный путь:\n")
+                .append(legacyBinary.getAbsolutePath())
+                .append('\n');
+
+        File aapt2;
+
+        if (nativeBinary != null
+                && nativeBinary.isFile()) {
+
+            aapt2 = nativeBinary;
+            log.append("\nИсточник: NATIVE_LIBRARY\n");
+
+        } else if (legacyBinary.isFile()) {
+
+            aapt2 = legacyBinary;
+            log.append("\nИсточник: LEGACY_BUILD_TOOLS\n");
+
+        } else {
+
             log.append("\nAAPT2: NOT_FOUND\n");
-            log.append("Файл aapt2 отсутствует.\n");
             log.append(
-                    "Нужна сборка AAPT2 для Android "
-                    + "и архитектуры устройства.\n"
+                    "libaapt2.so не найден в nativeLibraryDir.\n"
+            );
+            log.append(
+                    "aapt2 не найден в files/build-tools.\n"
             );
 
-            return new Result(
+            return result(
                     false, false, false,
-                    false, false, log.toString()
+                    false, false, log
             );
         }
 
-        log.append("\nAAPT2: FOUND\n");
+        log.append("AAPT2: FOUND\n");
         log.append("Путь: ")
                 .append(aapt2.getAbsolutePath())
                 .append('\n');
@@ -132,6 +173,8 @@ public final class CodeBoxAapt2Inspector {
         log.append("Размер: ")
                 .append(aapt2.length())
                 .append(" байт\n");
+
+        boolean executable = aapt2.canExecute();
 
         byte[] header = new byte[ELF_HEADER_SIZE];
 
@@ -141,6 +184,7 @@ public final class CodeBoxAapt2Inspector {
             int total = 0;
 
             while (total < header.length) {
+
                 int count = input.read(
                         header,
                         total,
@@ -151,30 +195,34 @@ public final class CodeBoxAapt2Inspector {
                     break;
                 }
 
+                if (count == 0) {
+                    continue;
+                }
+
                 total += count;
             }
 
-            if (total < ELF_HEADER_SIZE) {
+            if (total != header.length) {
+
                 log.append(
-                        "ELF: INVALID (заголовок слишком короткий)\n"
+                        "ELF: INVALID (короткий заголовок)\n"
                 );
 
-                return new Result(
+                return result(
                         true, false, false,
-                        aapt2.canExecute(),
-                        false, log.toString()
+                        executable, false, log
                 );
             }
 
         } catch (IOException e) {
+
             log.append("Ошибка чтения: ")
                     .append(e.getMessage())
                     .append('\n');
 
-            return new Result(
+            return result(
                     true, false, false,
-                    aapt2.canExecute(),
-                    false, log.toString()
+                    executable, false, log
             );
         }
 
@@ -185,54 +233,44 @@ public final class CodeBoxAapt2Inspector {
                 && header[3] == 'F';
 
         if (!validElf) {
-            log.append("ELF: INVALID\n");
-            log.append(
-                    "Файл не является обычным ELF executable.\n"
-            );
 
-            return new Result(
+            log.append("ELF: INVALID\n");
+
+            return result(
                     true, false, false,
-                    aapt2.canExecute(),
-                    false, log.toString()
+                    executable, false, log
             );
         }
-
-        log.append("ELF: OK\n");
 
         int elfClass = header[4] & 0xff;
         int endian = header[5] & 0xff;
 
-        String bitness;
+        if ((elfClass != 1 && elfClass != 2)
+                || (endian != 1 && endian != 2)) {
 
-        if (elfClass == 1) {
-            bitness = "32-bit";
-        } else if (elfClass == 2) {
-            bitness = "64-bit";
-        } else {
-            bitness = "UNKNOWN";
-        }
+            log.append("ELF: INVALID CLASS/ENDIAN\n");
 
-        log.append("Разрядность: ")
-                .append(bitness)
-                .append('\n');
-
-        if (endian != 1 && endian != 2) {
-            log.append("ELF byte order: INVALID\n");
-
-            return new Result(
+            return result(
                     true, false, false,
-                    aapt2.canExecute(),
-                    false, log.toString()
+                    executable, false, log
             );
         }
+
+        log.append("ELF: OK\n");
+        log.append("Разрядность: ")
+                .append(elfClass == 2 ? "64-bit" : "32-bit")
+                .append('\n');
 
         int machine;
 
         if (endian == 1) {
+
             machine =
                     (header[18] & 0xff)
                     | ((header[19] & 0xff) << 8);
+
         } else {
+
             machine =
                     ((header[18] & 0xff) << 8)
                     | (header[19] & 0xff);
@@ -241,6 +279,7 @@ public final class CodeBoxAapt2Inspector {
         String architecture;
 
         switch (machine) {
+
             case 3:
                 architecture = "x86";
                 break;
@@ -273,24 +312,28 @@ public final class CodeBoxAapt2Inspector {
             if (machine == 183
                     && elfClass == 2
                     && "arm64-v8a".equals(abi)) {
+
                 compatible = true;
             }
 
             if (machine == 40
                     && elfClass == 1
                     && abi.startsWith("armeabi")) {
+
                 compatible = true;
             }
 
             if (machine == 3
                     && elfClass == 1
                     && "x86".equals(abi)) {
+
                 compatible = true;
             }
 
             if (machine == 62
                     && elfClass == 2
                     && "x86_64".equals(abi)) {
+
                 compatible = true;
             }
         }
@@ -299,15 +342,14 @@ public final class CodeBoxAapt2Inspector {
                 .append(compatible ? "YES" : "NO")
                 .append('\n');
 
-        boolean executable = aapt2.canExecute();
-
         log.append("Права на выполнение: ")
                 .append(executable ? "YES" : "NO")
                 .append('\n');
 
         if (!executable) {
+
             log.append(
-                    "Файл не имеет разрешения на выполнение.\n"
+                    "Нет разрешения на выполнение AAPT2.\n"
             );
         }
 
@@ -316,48 +358,74 @@ public final class CodeBoxAapt2Inspector {
         if (testLaunch) {
 
             if (!compatible) {
+
                 log.append(
-                        "Запуск пропущен: архитектура несовместима.\n"
+                        "Запуск пропущен: несовместимая архитектура.\n"
                 );
 
             } else if (!executable) {
+
                 log.append(
                         "Запуск пропущен: нет прав выполнения.\n"
                 );
 
             } else {
+
                 launched = testVersion(aapt2, log);
             }
 
         } else {
+
             log.append(
-                    "\nЗапуск AAPT2 не выполнялся.\n"
+                    "\nЗапуск AAPT2 пока не выполнялся.\n"
             );
         }
 
         log.append("\n--- Итог ---\n");
 
         if (launched) {
+
             log.append("AAPT2 VERSION: OK\n");
 
         } else if (testLaunch) {
+
             log.append("AAPT2 VERSION: FAILED\n");
 
         } else if (compatible && executable) {
+
             log.append("AAPT2: NEEDS_LAUNCH_TEST\n");
 
         } else {
+
             log.append("AAPT2: NOT_READY\n");
         }
 
         log.append(
                 "Проверка ELF и ABI не гарантирует "
-                + "работу AAPT2 на Android.\n"
+                + "успешный запуск на Android.\n"
         );
 
+        return result(
+                true,
+                true,
+                compatible,
+                executable,
+                launched,
+                log
+        );
+    }
+
+    private static Result result(
+            boolean found,
+            boolean elfValid,
+            boolean compatible,
+            boolean executable,
+            boolean launched,
+            StringBuilder log
+    ) {
         return new Result(
-                true,
-                true,
+                found,
+                elfValid,
                 compatible,
                 executable,
                 launched,
@@ -372,6 +440,7 @@ public final class CodeBoxAapt2Inspector {
         Process process = null;
 
         try {
+
             log.append("\n--- AAPT2 version ---\n");
 
             ProcessBuilder builder = new ProcessBuilder(
@@ -383,13 +452,64 @@ public final class CodeBoxAapt2Inspector {
 
             process = builder.start();
 
+            final Process runningProcess = process;
+
+            final ByteArrayOutputStream output =
+                    new ByteArrayOutputStream();
+
+            Thread reader = new Thread(() -> {
+
+                try (InputStream input =
+                             runningProcess.getInputStream()) {
+
+                    byte[] buffer = new byte[1024];
+                    int total = 0;
+                    int count;
+
+                    while ((count = input.read(buffer)) != -1) {
+
+                        int remaining =
+                                MAX_OUTPUT_BYTES - total;
+
+                        if (remaining > 0) {
+
+                            int writeCount =
+                                    Math.min(count, remaining);
+
+                            output.write(
+                                    buffer,
+                                    0,
+                                    writeCount
+                            );
+
+                            total += writeCount;
+                        }
+                    }
+
+                } catch (IOException ignored) {
+                    // Поток может закрыться при завершении процесса.
+                }
+
+            }, "CodeBox-AAPT2-Output");
+
+            reader.setDaemon(true);
+            reader.start();
+
             boolean finished = process.waitFor(
                     TIMEOUT_SECONDS,
                     TimeUnit.SECONDS
             );
 
             if (!finished) {
+
                 process.destroyForcibly();
+
+                process.waitFor(
+                        1,
+                        TimeUnit.SECONDS
+                );
+
+                reader.join(1000);
 
                 log.append(
                         "TIMEOUT: AAPT2 не завершился за 5 секунд\n"
@@ -398,16 +518,36 @@ public final class CodeBoxAapt2Inspector {
                 return false;
             }
 
+            reader.join(1000);
+
             int exitCode = process.exitValue();
 
             log.append("Exit code: ")
                     .append(exitCode)
                     .append('\n');
 
+            String commandOutput;
+
+            synchronized (output) {
+                commandOutput = output.toString("UTF-8");
+            }
+
+            if (!commandOutput.isEmpty()) {
+
+                log.append("Вывод команды:\n");
+                log.append(commandOutput);
+
+                if (!commandOutput.endsWith("\n")) {
+                    log.append('\n');
+                }
+            }
+
             if (exitCode == 0) {
+
                 log.append(
                         "Команда version выполнена успешно.\n"
                 );
+
                 return true;
             }
 
@@ -418,15 +558,21 @@ public final class CodeBoxAapt2Inspector {
             return false;
 
         } catch (Exception e) {
+
             log.append("Ошибка запуска: ")
                     .append(e.getClass().getName())
                     .append(": ")
                     .append(e.getMessage())
                     .append('\n');
 
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+
             return false;
 
         } finally {
+
             if (process != null) {
                 process.destroy();
             }

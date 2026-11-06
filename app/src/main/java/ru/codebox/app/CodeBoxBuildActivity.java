@@ -29,11 +29,10 @@ import java.util.Locale;
 /**
  * CodeBox 5 - Local Build Screen.
  *
- * ECJ compilation, CLASS verification and experimental D8.
- * Android SDK and toolchain installation.
- * Build diagnostics and log sharing.
+ * Manifest preparation, ECJ compilation,
+ * CLASS verification and D8 compilation.
  *
- * APK/AAB packaging and signing are not implemented.
+ * APK/AAB packaging and signing are not yet implemented.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
@@ -265,19 +264,18 @@ public final class CodeBoxBuildActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
                 .setMessage(
-                        "Запустим ECJ, проверим CLASS файлы "
-                        + "и попробуем создать classes.dex "
-                        + "через D8.\n\n"
+                        "Запустим подготовку манифеста, "
+                        + "ECJ, проверку CLASS и D8.\n\n"
                         + "Для компиляции необходим "
                         + "build-tools/android.jar.\n\n"
-                        + "Это экспериментальный запуск D8 "
-                        + "на Android 12.\n\n"
+                        + "Подготовка манифеста пока "
+                        + "проверяется для MyApp.\n\n"
                         + "Упаковка и подпись APK/AAB "
-                        + "пока не подключены."
+                        + "ещё не подключены."
                 )
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton(
-                        "Запустить ECJ + D8",
+                        "Запустить",
                         (d, w) -> runDiagnostic(format)
                 )
                 .show();
@@ -295,11 +293,12 @@ public final class CodeBoxBuildActivity extends Activity {
         installationReport = null;
 
         statusView.setText(
-                "Статус: компиляция ECJ + D8..."
+                "Статус: подготовка XML, ECJ + D8..."
         );
 
         reportView.setText(
-                "Компилируем Java и запускаем D8. Подождите..."
+                "Проверяем манифест и компилируем Java. "
+                + "Подождите..."
         );
 
         new Thread(() -> {
@@ -346,6 +345,60 @@ public final class CodeBoxBuildActivity extends Activity {
                             "Готовность AAB: "
                             + (tools.readyForAab ? "да" : "нет")
                     );
+
+                    // New step: prepare a working copy of
+                    // AndroidManifest.xml before ECJ and D8.
+                    if (format ==
+                            CodeBoxBuildManager.OutputFormat.APK) {
+
+                        manager.setStage(
+                                "Подготовка AndroidManifest.xml"
+                        );
+
+                        try {
+                            File manifestWork = new File(
+                                    getCacheDir(),
+                                    "apk-manifest-" + projectName
+                            );
+
+                            CodeBoxApkManifestPreparer.Result
+                                    manifestResult =
+                                    CodeBoxApkManifestPreparer.prepare(
+                                            project,
+                                            manifestWork,
+                                            "com.example.myapp"
+                                    );
+
+                            manager.info(manifestResult.report);
+
+                            if (manifestResult.manifestFile.isFile()
+                                    && manifestResult.manifestFile.length() > 0) {
+
+                                manager.info(
+                                        "MANIFEST_PREPARED: OK"
+                                );
+
+                                manager.info(
+                                        "Размер XML: "
+                                        + manifestResult.manifestFile.length()
+                                        + " байт"
+                                );
+
+                            } else {
+                                throw new IOException(
+                                        "Подготовленный манифест отсутствует"
+                                );
+                            }
+
+                        } catch (Exception e) {
+                            manager.fail(
+                                    "Ошибка подготовки манифеста: "
+                                    + e.getClass().getName()
+                                    + ": " + e.getMessage()
+                            );
+                            return;
+                        }
+                    }
 
                     manager.setStage("Подготовка Java");
 
@@ -405,9 +458,6 @@ public final class CodeBoxBuildActivity extends Activity {
         }, "CodeBoxEcjD8Build").start();
     }
 
-    /**
-     * Verify CLASS files, inspect D8 and run D8 compiler.
-     */
     private void verifyClassFilesAndRunD8(
             File classesDirectory,
             CodeBoxBuildManager.OutputFormat format
@@ -938,8 +988,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
         reportView.setText(
                 state == CodeBoxBuildManager.State.IDLE
-                ? "Выберите APK или AAB для запуска ECJ "
-                  + "и D8. Если Android API отсутствует, "
+                ? "Выберите APK или AAB для запуска "
+                  + "диагностики. Если Android API отсутствует, "
                   + "установите доверенный android.jar."
                 : manager.getReport()
         );

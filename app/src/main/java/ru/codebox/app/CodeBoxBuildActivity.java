@@ -177,7 +177,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 + "Для APK дополнительно запустим AAPT2 compile + link "
                 + "и попробуем создать промежуточный APK с ресурсами.\n\n"
                 + "Необходим build-tools/android.jar.\n\n"
-                + "Подготовка манифеста пока настроена для MyApp.\n\n"
+                + "Пакет приложения определяется из AndroidManifest.xml проекта.\n\n"
                 + "Для APK выполним упаковку classes.dex и попробуем подписать APK. "
                 + "Ключ Android Keystore будет создан при первом запуске. "
                 + "Не удаляйте CodeBox: ключ может быть утрачен.";
@@ -254,7 +254,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         File manifestWork = new File(getCacheDir(), "apk-manifest-" + projectName);
                         CodeBoxApkManifestPreparer.Result manifestResult =
                                 CodeBoxApkManifestPreparer.prepare(
-                                        project, manifestWork, "com.example.myapp");
+                                        project, manifestWork);
                         manager.info(manifestResult.report);
                         if (manifestResult.manifestFile == null
                                 || !manifestResult.manifestFile.isFile()
@@ -262,6 +262,7 @@ public final class CodeBoxBuildActivity extends Activity {
                             throw new IOException("Подготовленный манифест отсутствует");
                         }
                         preparedManifest = manifestResult.manifestFile;
+                        manager.info("applicationId: " + manifestResult.applicationId);
                         manager.info("MANIFEST_PREPARED: OK");
                         manager.info("Размер XML: " + preparedManifest.length() + " байт");
                     } catch (Exception e) {
@@ -797,4 +798,4 @@ public final class CodeBoxBuildActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
-                            }
+                }

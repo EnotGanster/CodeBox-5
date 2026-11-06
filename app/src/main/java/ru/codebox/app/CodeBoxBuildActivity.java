@@ -169,7 +169,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 + "и попробуем создать промежуточный APK с ресурсами.\n\n"
                 + "Необходим build-tools/android.jar.\n\n"
                 + "Подготовка манифеста пока настроена для MyApp.\n\n"
-                + "Добавление classes.dex в APK и подпись пока не подключены.";
+                + "Упаковка classes.dex в APK будет выполнена. Подпись пока не подключена.";
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
                 .setMessage(message)
@@ -236,6 +236,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 // Keep the prepared manifest reference for the AAPT2 link step.
                 File preparedManifest = null;
+                File linkedResourceApk = null;
                 if (format == CodeBoxBuildManager.OutputFormat.APK) {
                     manager.setStage("Подготовка AndroidManifest.xml");
                     try {
@@ -269,6 +270,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         if (resources.compiled && resources.resourceApk != null
                                 && resources.resourceApk.isFile()
                                 && resources.resourceApk.length() > 0) {
+                            linkedResourceApk = resources.resourceApk;
                             manager.info("RESOURCE_APK_CREATED: OK");
                             manager.info("Путь: " + resources.resourceApk.getAbsolutePath());
                             manager.info("Размер: " + resources.resourceApk.length() + " байт");
@@ -299,7 +301,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 }
                 manager.info("Java успешно скомпилирована. Каталог: "
                         + compiled.classesDirectory.getAbsolutePath());
-                verifyClassFilesAndRunD8(compiled.classesDirectory, format);
+                verifyClassFilesAndRunD8(compiled.classesDirectory, format, linkedResourceApk);
             } catch (Throwable e) {
                 if (manager.getState() == CodeBoxBuildManager.State.RUNNING) {
                     manager.fail("Ошибка сборки: " + e.getClass().getName()
@@ -315,7 +317,8 @@ public final class CodeBoxBuildActivity extends Activity {
     }
 
     private void verifyClassFilesAndRunD8(
-            File classesDirectory, CodeBoxBuildManager.OutputFormat format) throws IOException {
+            File classesDirectory, CodeBoxBuildManager.OutputFormat format,
+            File linkedResourceApk) throws IOException {
         manager.setStage("Проверка CLASS");
         if (classesDirectory == null || !classesDirectory.isDirectory()) {
             manager.fail("Каталог CLASS файлов не существует");
@@ -363,10 +366,30 @@ public final class CodeBoxBuildActivity extends Activity {
         manager.info("classes.dex: OK");
         manager.info("Путь: " + dex.dexFile.getAbsolutePath());
         manager.info("Размер: " + dex.dexFile.length() + " байт");
-        manager.fail("ECJ и D8 успешно завершены. classes.dex создан. "
-                + "Результат AAPT2 compile/link указан выше. "
-                + "Добавление DEX в APK и подпись " + format.name()
-                + " пока не подключены. Готовый APK/AAB не создан.");
+        if (format == CodeBoxBuildManager.OutputFormat.APK) {
+            manager.setStage("Упаковка APK");
+            if (linkedResourceApk == null || !linkedResourceApk.isFile()
+                    || linkedResourceApk.length() == 0) {
+                manager.fail("AAPT2 не создал промежуточный APK. "
+                        + "Упаковка classes.dex невозможна.");
+                return;
+            }
+            CodeBoxApkPackager.Result packaged = CodeBoxApkPackager.packageApk(
+                    getApplicationContext(), linkedResourceApk, dex.dexFile, projectName);
+            manager.info(packaged.report);
+            if (!packaged.packaged || packaged.apkFile == null
+                    || !packaged.apkFile.isFile() || packaged.apkFile.length() == 0) {
+                manager.fail("Упаковщик не создал APK. См. диагностику выше.");
+                return;
+            }
+            manager.info("UNSIGNED_APK_CREATED: OK");
+            manager.info("Путь: " + packaged.apkFile.getAbsolutePath());
+            manager.info("Размер: " + packaged.apkFile.length() + " байт");
+            manager.fail("Промежуточный APK с classes.dex создан успешно. "
+                    + "Подпись APK пока не подключена, поэтому устанавливаемый APK ещё не готов.");
+        } else {
+            manager.fail("ECJ и D8 завершены. Сборка AAB пока не реализована.");
+        }
     }
 
     private static final class ClassScan {
@@ -662,4 +685,4 @@ public final class CodeBoxBuildActivity extends Activity {
     private void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
-                }
+                        }

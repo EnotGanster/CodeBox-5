@@ -30,7 +30,8 @@ import java.util.Locale;
  * CodeBox 5 - Local Build Screen.
  *
  * Manifest preparation, ECJ compilation,
- * CLASS verification and D8 compilation.
+ * CLASS verification, D8 compilation,
+ * and AAPT2 inspection.
  *
  * APK/AAB packaging and signing are not yet implemented.
  */
@@ -264,12 +265,14 @@ public final class CodeBoxBuildActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Локальная сборка " + format.name())
                 .setMessage(
-                        "Запустим подготовку манифеста, "
+                        "Запустим проверку инструментов, "
+                        + "диагностику AAPT2, подготовку манифеста, "
                         + "ECJ, проверку CLASS и D8.\n\n"
                         + "Для компиляции необходим "
                         + "build-tools/android.jar.\n\n"
                         + "Подготовка манифеста пока "
                         + "проверяется для MyApp.\n\n"
+                        + "AAPT2 пока не запускается. "
                         + "Упаковка и подпись APK/AAB "
                         + "ещё не подключены."
                 )
@@ -293,12 +296,12 @@ public final class CodeBoxBuildActivity extends Activity {
         installationReport = null;
 
         statusView.setText(
-                "Статус: подготовка XML, ECJ + D8..."
+                "Статус: AAPT2, XML, ECJ + D8..."
         );
 
         reportView.setText(
-                "Проверяем манифест и компилируем Java. "
-                + "Подождите..."
+                "Проверяем AAPT2 и манифест, "
+                + "затем компилируем Java. Подождите..."
         );
 
         new Thread(() -> {
@@ -346,8 +349,58 @@ public final class CodeBoxBuildActivity extends Activity {
                             + (tools.readyForAab ? "да" : "нет")
                     );
 
-                    // New step: prepare a working copy of
-                    // AndroidManifest.xml before ECJ and D8.
+                    // NEW: AAPT2 diagnostics.
+                    // Only inspect the file and ELF header.
+                    // Do not execute AAPT2 yet.
+                    manager.setStage("Проверка AAPT2");
+
+                    try {
+                        CodeBoxAapt2Inspector.Result aapt2 =
+                                CodeBoxAapt2Inspector.inspect(
+                                        getApplicationContext(),
+                                        false
+                                );
+
+                        manager.info(aapt2.report);
+
+                        if (!aapt2.found) {
+                            manager.info(
+                                    "AAPT2_STATUS: NOT_FOUND"
+                            );
+                            manager.info(
+                                    "AAPT2 пока отсутствует. "
+                                    + "ECJ и D8 продолжат работу."
+                            );
+                        } else {
+                            manager.info(
+                                    "AAPT2_FOUND: YES"
+                            );
+                            manager.info(
+                                    "AAPT2_ELF_VALID: "
+                                    + aapt2.elfValid
+                            );
+                            manager.info(
+                                    "AAPT2_ARCH_COMPATIBLE: "
+                                    + aapt2.architectureCompatible
+                            );
+                            manager.info(
+                                    "AAPT2_EXECUTABLE: "
+                                    + aapt2.executable
+                            );
+                            manager.info(
+                                    "AAPT2_LAUNCH_TEST: NOT_RUN"
+                            );
+                        }
+
+                    } catch (Throwable error) {
+                        manager.warning(
+                                "Ошибка диагностики AAPT2: "
+                                + error.getClass().getName()
+                                + ": " + error.getMessage()
+                        );
+                    }
+
+                    // Prepare working copy of AndroidManifest.xml.
                     if (format ==
                             CodeBoxBuildManager.OutputFormat.APK) {
 
@@ -574,7 +627,7 @@ public final class CodeBoxBuildActivity extends Activity {
         manager.fail(
                 "ECJ и D8 успешно завершены. "
                 + "classes.dex создан. "
-                + "Упаковка ресурсов и подпись "
+                + "AAPT2, упаковка ресурсов и подпись "
                 + format.name()
                 + " пока не подключены. "
                 + "APK/AAB не создан."

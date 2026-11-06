@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.util.Xml;

@@ -43,4 +43,7 @@ dependencies {
 
     // Подпись APK и проверка подписи.
     implementation 'com.android.tools.build:apksig:8.7.3'
+
+    // Создание Android App Bundle (AAB).
+    implementation 'com.android.tools.build:bundletool:1.18.2'
 }

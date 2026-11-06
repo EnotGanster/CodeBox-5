@@ -29,12 +29,15 @@ import java.util.Locale;
 /**
  * CodeBox 5 - Local Build Screen.
  *
- * ECJ Java compilation and CLASS verification.
+ * ECJ Java compilation.
+ * CLASS file verification.
+ * D8 class-loading diagnostics.
  * Android SDK installation.
  * Toolchain ZIP installation.
  * Build diagnostics and log sharing.
  *
- * D8, APK packaging and signing are not yet connected.
+ * DEX generation, APK packaging and signing
+ * are not yet connected.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
@@ -121,6 +124,7 @@ public final class CodeBoxBuildActivity extends Activity {
         statusView = label(
                 "Ожидание", 13, muted, true
         );
+
         statusView.setPadding(
                 dp(12), dp(10), dp(12), dp(10)
         );
@@ -161,9 +165,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams jarParams =
-                new LinearLayout.LayoutParams(
-                        -1, dp(44)
-                );
+                new LinearLayout.LayoutParams(-1, dp(44));
 
         jarParams.topMargin = dp(10);
         root.addView(androidJarButton, jarParams);
@@ -182,9 +184,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams installParams =
-                new LinearLayout.LayoutParams(
-                        -1, dp(44)
-                );
+                new LinearLayout.LayoutParams(-1, dp(44));
 
         installParams.topMargin = dp(8);
         root.addView(install, installParams);
@@ -303,14 +303,16 @@ public final class CodeBoxBuildActivity extends Activity {
                 .setMessage(
                         "Запустим ECJ, проверим Java-классы "
                         + "и найдём MainActivity.class.\n\n"
-                        + "Для Android-кода необходим "
+                        + "Затем проверим загрузку классов "
+                        + "D8 на Android 12.\n\n"
+                        + "Для компиляции необходим "
                         + "build-tools/android.jar.\n\n"
-                        + "D8, упаковка и подпись APK/AAB "
-                        + "пока не подключены."
+                        + "Создание DEX, упаковка и подпись "
+                        + "APK/AAB пока не подключены."
                 )
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton(
-                        "Запустить ECJ",
+                        "Запустить проверку",
                         (d, w) -> runDiagnostic(format)
                 )
                 .show();
@@ -328,12 +330,12 @@ public final class CodeBoxBuildActivity extends Activity {
         installationReport = null;
 
         statusView.setText(
-                "Статус: компиляция и проверка CLASS..."
+                "Статус: компиляция ECJ и проверка D8..."
         );
 
         reportView.setText(
-                "Проверяем проект и запускаем ECJ. "
-                + "Подождите..."
+                "Проверяем проект, запускаем ECJ "
+                + "и диагностируем D8. Подождите..."
         );
 
         new Thread(() -> {
@@ -449,11 +451,11 @@ public final class CodeBoxBuildActivity extends Activity {
                     refreshReport();
                 });
             }
-        }, "CodeBoxEcjBuild").start();
+        }, "CodeBoxEcjD8Build").start();
     }
 
     /**
-     * Verify ECJ output before connecting D8.
+     * Verify ECJ output and inspect D8.
      */
     private void verifyClassFiles(
             File classesDirectory,
@@ -526,9 +528,32 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Проверка CLASS завершена."
         );
 
+        // New stage: inspect embedded D8 classes.
+        // Does not modify ECJ output.
+        manager.setStage("Проверка D8");
+
+        try {
+            String d8Report =
+                    CodeBoxD8Inspector.inspect(
+                            getApplicationContext()
+                    );
+
+            manager.info(d8Report);
+
+        } catch (Throwable error) {
+            manager.warning(
+                    "Ошибка проверки D8: "
+                    + error.getClass().getName()
+                    + ": "
+                    + error.getMessage()
+            );
+        }
+
         manager.fail(
-                "Java-классы проверены. "
-                + "D8, упаковка и подпись "
+                "ECJ и проверка CLASS завершены. "
+                + "Диагностика D8 записана в журнал. "
+                + "Создание classes.dex, упаковка "
+                + "и подпись "
                 + format.name()
                 + " пока не подключены. "
                 + "APK/AAB не создан."
@@ -959,7 +984,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
         reportView.setText(
                 state == CodeBoxBuildManager.State.IDLE
-                ? "Выберите APK или AAB для запуска ECJ. "
+                ? "Выберите APK или AAB для запуска ECJ "
+                  + "и проверки D8. "
                   + "Если Android API отсутствует, "
                   + "установите доверенный android.jar."
                 : manager.getReport()

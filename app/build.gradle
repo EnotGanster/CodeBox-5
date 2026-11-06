@@ -44,6 +44,12 @@ dependencies {
     // Подпись APK и проверка подписи.
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // Создание Android App Bundle (AAB).
+    // Создание Android App Bundle.
     implementation 'com.android.tools.build:bundletool:1.18.2'
+
+    // Protocol Buffers для BundleConfig.
+    implementation 'com.google.protobuf:protobuf-java:3.25.5'
+
+    // Google Guava для API bundletool.
+    implementation 'com.google.guava:guava:33.3.1-android'
 }

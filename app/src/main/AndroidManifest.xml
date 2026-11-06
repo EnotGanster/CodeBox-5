@@ -3,6 +3,7 @@
 
     <application
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:label="CodeBox 5"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

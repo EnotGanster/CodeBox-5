@@ -22,7 +22,6 @@ android {
 
     packaging {
         jniLibs {
-            // Извлекать libaapt2.so из APK.
             useLegacyPackaging = true
         }
     }
@@ -34,18 +33,34 @@ android {
 }
 
 // --------------------------------------------------
-// CodeBox 5 — bundletool с исправленным EnumMapper
+// CodeBox 5 — зависимости bundletool
 // --------------------------------------------------
 
-// Получаем зависимости оригинального bundletool,
-// но не включаем его собственный JAR в APK.
 configurations {
     bundletoolDependencies {
         transitive = true
     }
 }
 
+// --------------------------------------------------
+// Единая версия Guava для Android
+// --------------------------------------------------
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'com.google.guava'
+                && details.requested.name == 'guava') {
+
+            details.useVersion '33.3.1-android'
+            details.because(
+                'CodeBox runs bundletool on Android'
+            )
+        }
+    }
+}
+
 dependencies {
+
     // Локальный Java-компилятор.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
@@ -56,12 +71,11 @@ dependencies {
     implementation 'com.android.tools.build:apksig:8.7.3'
 
     // Исправленный bundletool 1.18.2.
-    // Внутри уже заменён EnumMapper.class.
     implementation files(
         'libs/bundletool-patched-1.18.2.jar'
     )
 
-    // Только для получения списка зависимостей.
+    // Метаданные транзитивных зависимостей.
     bundletoolDependencies(
         'com.android.tools.build:bundletool:1.18.2'
     )
@@ -69,12 +83,12 @@ dependencies {
     // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Guava.
-    implementation 'com.google.guava:guava:33.3.1-jre'
+    // Guava для Android.
+    implementation 'com.google.guava:guava:33.3.1-android'
 }
 
 // --------------------------------------------------
-// Перенос транзитивных зависимостей bundletool
+// Подключение зависимостей оригинального bundletool
 // --------------------------------------------------
 
 def bundletoolDependencyArtifacts =
@@ -82,37 +96,34 @@ def bundletoolDependencyArtifacts =
         .incoming
         .resolutionResult
 
-def bundletoolComponentId =
-    'com.android.tools.build:bundletool:1.18.2'
-
-// Используем метаданные Gradle, чтобы добавить
-// прямые зависимости bundletool в implementation.
-// Сам оригинальный bundletool не добавляем.
 afterEvaluate {
+
     def rootComponent =
         bundletoolDependencyArtifacts.root
 
     rootComponent.dependencies.each { dependency ->
+
         if (dependency instanceof
                 org.gradle.api.artifacts.result.ResolvedDependencyResult) {
 
             def selected = dependency.selected
 
-            if (selected.moduleVersion != null &&
-                    selected.moduleVersion.group ==
-                    'com.android.tools.build' &&
-                    selected.moduleVersion.name == 'bundletool') {
+            if (selected.moduleVersion != null
+                    && selected.moduleVersion.group ==
+                    'com.android.tools.build'
+                    && selected.moduleVersion.name == 'bundletool') {
 
                 selected.dependencies.each { child ->
+
                     if (child instanceof
                             org.gradle.api.artifacts.result.ResolvedDependencyResult) {
 
                         def module = child.selected.moduleVersion
 
-                        if (module != null &&
-                                !(module.group ==
-                                    'com.android.tools.build' &&
-                                    module.name == 'bundletool')) {
+                        if (module != null
+                                && !(module.group ==
+                                    'com.android.tools.build'
+                                    && module.name == 'bundletool')) {
 
                             dependencies.add(
                                 'implementation',
@@ -124,4 +135,68 @@ afterEvaluate {
             }
         }
     }
+}
+
+// --------------------------------------------------
+// Диагностика Guava
+// --------------------------------------------------
+
+tasks.register('verifyGuavaStreams') {
+
+    doLast {
+
+        def guavaArtifacts =
+            configurations.debugRuntimeClasspath
+                .resolvedConfiguration
+                .resolvedArtifacts
+                .findAll { artifact ->
+                    artifact.moduleVersion.id.group ==
+                        'com.google.guava'
+                    && artifact.name == 'guava'
+                }
+
+        if (guavaArtifacts.isEmpty()) {
+            throw new GradleException(
+                'Guava не найдена в debugRuntimeClasspath'
+            )
+        }
+
+        guavaArtifacts.each { artifact ->
+
+            println "GUAVA_SELECTED: ${artifact.moduleVersion.id}"
+
+            def jarFile = artifact.file
+
+            if (!jarFile.name.endsWith('.jar')) {
+                throw new GradleException(
+                    "Ожидался JAR Guava: ${jarFile.name}"
+                )
+            }
+
+            def zip = new java.util.zip.ZipFile(jarFile)
+
+            try {
+                def entry = zip.getEntry(
+                    'com/google/common/collect/Streams.class'
+                )
+
+                if (entry == null) {
+                    throw new GradleException(
+                        'GUAVA_STREAMS: MISSING'
+                    )
+                }
+
+                println 'GUAVA_STREAMS: FOUND'
+
+            } finally {
+                zip.close()
+            }
+        }
+    }
+}
+
+tasks.matching {
+    it.name == 'assembleDebug'
+}.configureEach {
+    dependsOn tasks.named('verifyGuavaStreams')
 }

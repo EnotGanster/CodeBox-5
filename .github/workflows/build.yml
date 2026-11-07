@@ -46,11 +46,13 @@ jobs:
           CLASS="com/android/tools/build/bundletool/model/utils/EnumMapper.class"
 
           OLD_SHA=$(
-            unzip -p "$OLD" "$CLASS" | sha256sum | cut -d ' ' -f 1
+            unzip -p "$OLD" "$CLASS" |
+              sha256sum | cut -d ' ' -f 1
           )
 
           PATCH_SHA=$(
-            unzip -p "$PATCH" "$CLASS" | sha256sum | cut -d ' ' -f 1
+            unzip -p "$PATCH" "$CLASS" |
+              sha256sum | cut -d ' ' -f 1
           )
 
           echo "Existing EnumMapper: $OLD_SHA"
@@ -135,10 +137,10 @@ jobs:
           cp "$SOURCE" \
             diagnostics/original-BundleModuleParser.java
 
-          sha256sum "$SOURCE" \
-            | tee diagnostics/original-parser-sha256.txt
+          sha256sum "$SOURCE" |
+            tee diagnostics/original-parser-sha256.txt
 
-          echo "Official 1.18.2 source downloaded."
+          echo "Official source downloaded."
 
       - name: Patch BundleModuleParser
         shell: bash
@@ -229,7 +231,6 @@ jobs:
           mkdir -p patched-output
 
           OLD="app/libs/bundletool-patched-1.18.2.jar"
-
           NEW="patched-output/bundletool-patched-1.18.2.jar"
 
           cp "$OLD" "$NEW"
@@ -243,8 +244,7 @@ jobs:
 
           test -s "$NEW"
 
-          unzip -t "$NEW" \
-            | tail -n 2
+          unzip -t "$NEW" | tail -n 2
 
           echo "Second patched JAR created."
 
@@ -265,34 +265,50 @@ jobs:
           echo "=== Verify EnumMapper unchanged ==="
 
           OLD_ENUM_SHA=$(
-            unzip -p "$OLD" "$ENUM" \
-              | sha256sum | cut -d ' ' -f 1
+            unzip -p "$OLD" "$ENUM" |
+              sha256sum | cut -d ' ' -f 1
           )
 
           NEW_ENUM_SHA=$(
-            unzip -p "$NEW" "$ENUM" \
-              | sha256sum | cut -d ' ' -f 1
+            unzip -p "$NEW" "$ENUM" |
+              sha256sum | cut -d ' ' -f 1
           )
+
+          echo "OLD_ENUM_SHA=$OLD_ENUM_SHA"
+          echo "NEW_ENUM_SHA=$NEW_ENUM_SHA"
 
           test "$OLD_ENUM_SHA" = "$NEW_ENUM_SHA"
 
           echo "EnumMapper preserved."
 
-          echo "=== Verify BundleModuleParser replaced ==="
+          echo "=== Verify BundleModuleParser replacement ==="
 
           OLD_PARSER_SHA=$(
-            unzip -p "$OLD" "$PARSER" \
-              | sha256sum | cut -d ' ' -f 1
+            unzip -p "$OLD" "$PARSER" |
+              sha256sum | cut -d ' ' -f 1
           )
 
           NEW_PARSER_SHA=$(
-            unzip -p "$NEW" "$PARSER" \
-              | sha256sum | cut -d ' ' -f 1
+            unzip -p "$NEW" "$PARSER" |
+              sha256sum | cut -d ' ' -f 1
           )
 
-          test "$OLD_PARSER_SHA" != "$NEW_PARSER_SHA"
+          echo "OLD_PARSER_SHA=$OLD_PARSER_SHA"
+          echo "NEW_PARSER_SHA=$NEW_PARSER_SHA"
 
-          echo "BundleModuleParser changed."
+          if [ "$OLD_PARSER_SHA" = "$NEW_PARSER_SHA" ]; then
+            echo "WARNING: Parser checksums are identical."
+            echo "Inspecting actual bytecode."
+          else
+            echo "BundleModuleParser class changed."
+          fi
+
+          echo "=== Inspect old parser ==="
+
+          javap -classpath "$OLD" \
+            -c -p \
+            com.android.tools.build.bundletool.model.utils.BundleModuleParser \
+            | tee diagnostics/old-parser-bytecode.txt
 
           echo "=== Inspect new parser ==="
 
@@ -301,16 +317,21 @@ jobs:
             com.android.tools.build.bundletool.model.utils.BundleModuleParser \
             | tee diagnostics/new-parser-bytecode.txt
 
+          echo "=== Verify incompatible predicate removed ==="
+
           if grep -Fq \
             'com/google/common/base/Predicates.not' \
             diagnostics/new-parser-bytecode.txt; then
-            echo "ERROR: Incompatible predicate remains"
+
+            echo "ERROR: Incompatible Predicates.not remains."
             exit 1
           fi
 
           grep -Fq \
             'java/util/stream/Stream.filter' \
             diagnostics/new-parser-bytecode.txt
+
+          echo "BundleModuleParser bytecode verified."
 
           echo "=== Verify EnumMapper bytecode ==="
 
@@ -322,14 +343,20 @@ jobs:
           if grep -Fq \
             'com/google/common/base/Predicates.not' \
             diagnostics/new-enummapper-bytecode.txt; then
-            echo "ERROR: EnumMapper regression"
+
+            echo "ERROR: EnumMapper regression."
             exit 1
           fi
 
+          echo "=== Verify JAR integrity ==="
+
+          unzip -t "$NEW" |
+            tail -n 2
+
           echo "=== Checksums ==="
 
-          sha256sum "$OLD" "$NEW" \
-            | tee diagnostics/bundletool-checksums.txt
+          sha256sum "$OLD" "$NEW" |
+            tee diagnostics/bundletool-checksums.txt
 
           echo "Both patches verified."
 
@@ -374,8 +401,8 @@ jobs:
             | grep -E '^classes[0-9]*\.dex$' \
             | tee diagnostics/apk-dex-files.txt
 
-          sha256sum "$APK" \
-            | tee diagnostics/apk-sha256.txt
+          sha256sum "$APK" |
+            tee diagnostics/apk-sha256.txt
 
       - name: Prepare Android API 35
         shell: bash

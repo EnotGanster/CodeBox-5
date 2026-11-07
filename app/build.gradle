@@ -50,6 +50,7 @@ dependencies {
     // Protocol Buffers для BundleConfig.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Google Guava для API bundletool.
-    implementation 'com.google.guava:guava:33.3.1-android'
+    // Google Guava: проверка JRE-варианта
+    // для устранения конфликта Predicate в bundletool.
+    implementation 'com.google.guava:guava:33.3.1-jre'
 }

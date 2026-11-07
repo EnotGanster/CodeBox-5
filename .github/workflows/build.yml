@@ -27,11 +27,84 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Check patched bundletool files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p diagnostics
+
+          PATCH="app/libs/enummapper-candidate.jar"
+          BUNDLETOOL="app/libs/bundletool-patched-1.18.2.jar"
+
+          echo "=== Check local JAR files ==="
+
+          test -s "$PATCH"
+          test -s "$BUNDLETOOL"
+
+          echo "=== Verify JAR archives ==="
+
+          unzip -t "$PATCH" \
+            | tail -n 2
+
+          unzip -t "$BUNDLETOOL" \
+            | tail -n 2
+
+          CLASS="com/android/tools/build/bundletool/model/utils/EnumMapper.class"
+
+          echo "=== Verify EnumMapper ==="
+
+          unzip -Z -1 "$PATCH" \
+            | grep -Fx "$CLASS"
+
+          unzip -Z -1 "$BUNDLETOOL" \
+            | grep -Fx "$CLASS"
+
+          PATCH_SHA=$(
+            unzip -p "$PATCH" "$CLASS" \
+              | sha256sum | cut -d ' ' -f 1
+          )
+
+          BUNDLETOOL_SHA=$(
+            unzip -p "$BUNDLETOOL" "$CLASS" \
+              | sha256sum | cut -d ' ' -f 1
+          )
+
+          {
+            echo "Patch class: $PATCH_SHA"
+            echo "Bundletool class: $BUNDLETOOL_SHA"
+          } | tee diagnostics/enummapper-checksums.txt
+
+          test "$PATCH_SHA" = "$BUNDLETOOL_SHA"
+
+          echo "=== Inspect patched bytecode ==="
+
+          javap -classpath "$BUNDLETOOL" \
+            -c -p \
+            com.android.tools.build.bundletool.model.utils.EnumMapper \
+            | tee diagnostics/patched-enummapper-bytecode.txt
+
+          if grep -q 'com/google/common/base/Predicates.not' \
+              diagnostics/patched-enummapper-bytecode.txt; then
+            echo "ERROR: Old Predicate call remains"
+            exit 1
+          fi
+
+          echo "=== Check JAR checksum ==="
+
+          sha256sum "$BUNDLETOOL" \
+            | tee diagnostics/patched-bundletool-sha256.txt
+
+          echo "Patched bundletool verification passed."
+
       - name: Diagnose dependencies
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p diagnostics
+
+          echo "=== Guava dependency insight ==="
 
           gradle --no-daemon \
             :app:dependencyInsight \
@@ -39,25 +112,32 @@ jobs:
             --dependency com.google.guava:guava \
             | tee diagnostics/guava-dependency-insight.txt
 
+          echo "=== Runtime dependencies ==="
+
           gradle --no-daemon \
             :app:dependencies \
             --configuration debugRuntimeClasspath \
             | tee diagnostics/debug-runtime-dependencies.txt
 
       - name: Build Debug APK
-        run: gradle --no-daemon assembleDebug
-
-      - name: Resolve Guava and bundletool
         shell: bash
         run: |
           set -euo pipefail
+
+          gradle --no-daemon assembleDebug
+
+      - name: Diagnose runtime Guava
+        shell: bash
+        run: |
+          set -euo pipefail
+
           mkdir -p diagnostics
 
-          cat > diagnostics/inspect-libraries.gradle <<'EOF'
+          cat > diagnostics/inspect-guava.gradle <<'EOF'
           allprojects {
               afterEvaluate { project ->
                   if (project.path == ':app') {
-                      project.tasks.register('inspectRuntimeLibraries') {
+                      project.tasks.register('inspectRuntimeGuava') {
                           doLast {
                               def config =
                                   project.configurations.getByName(
@@ -79,18 +159,6 @@ jobs:
                                           artifact.file.absolutePath
                                       )
                                   }
-
-                                  if (id.group ==
-                                          'com.android.tools.build'
-                                          && id.name == 'bundletool') {
-                                      println(
-                                          'BUNDLETOOL_VERSION=' + id.version
-                                      )
-                                      println(
-                                          'BUNDLETOOL_JAR=' +
-                                          artifact.file.absolutePath
-                                      )
-                                  }
                               }
                           }
                       }
@@ -100,179 +168,61 @@ jobs:
           EOF
 
           gradle --no-daemon \
-            --init-script diagnostics/inspect-libraries.gradle \
-            :app:inspectRuntimeLibraries \
-            | tee diagnostics/resolved-libraries.txt
+            --init-script diagnostics/inspect-guava.gradle \
+            :app:inspectRuntimeGuava \
+            | tee diagnostics/resolved-guava.txt
 
           GUAVA_JAR=$(sed -n \
             's/^GUAVA_JAR=//p' \
-            diagnostics/resolved-libraries.txt \
+            diagnostics/resolved-guava.txt \
             | tail -n 1)
 
-          BUNDLETOOL_JAR=$(sed -n \
-            's/^BUNDLETOOL_JAR=//p' \
-            diagnostics/resolved-libraries.txt \
-            | tail -n 1)
+          if [ -z "$GUAVA_JAR" ] || \
+             [ ! -s "$GUAVA_JAR" ]; then
+            echo "ERROR: Guava JAR not found"
+            exit 1
+          fi
 
-          test -s "$GUAVA_JAR"
-          test -s "$BUNDLETOOL_JAR"
+          echo "=== Guava Predicate ==="
 
           javap -classpath "$GUAVA_JAR" \
             -p com.google.common.base.Predicate \
-            > diagnostics/guava-predicate.txt
+            | tee diagnostics/guava-predicate.txt
+
+          echo "=== Guava NotPredicate ==="
 
           javap -classpath "$GUAVA_JAR" \
             -p 'com.google.common.base.Predicates$NotPredicate' \
-            > diagnostics/guava-not-predicate.txt
+            | tee diagnostics/guava-not-predicate.txt
 
-          javap -classpath "$BUNDLETOOL_JAR" \
-            -c -p \
-            com.android.tools.build.bundletool.model.utils.EnumMapper \
-            > diagnostics/bundletool-enummapper-bytecode.txt
+          echo "=== Guava checksum ==="
 
-          {
-            sha256sum "$GUAVA_JAR"
-            sha256sum "$BUNDLETOOL_JAR"
-          } > diagnostics/library-checksums.txt
-
-      - name: Build patched bundletool JAR
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PATCH="app/libs/enummapper-candidate.jar"
-
-          BUNDLETOOL_JAR=$(sed -n \
-            's/^BUNDLETOOL_JAR=//p' \
-            diagnostics/resolved-libraries.txt \
-            | tail -n 1)
-
-          test -s "$PATCH"
-          test -s "$BUNDLETOOL_JAR"
-
-          mkdir -p diagnostics/patched-bundletool
-          mkdir -p diagnostics/patched-bundletool/work
-
-          OUTPUT="$PWD/diagnostics/patched-bundletool/bundletool-patched-1.18.2.jar"
-          WORK="$PWD/diagnostics/patched-bundletool/work"
-
-          CLASS="com/android/tools/build/bundletool/model/utils/EnumMapper.class"
-
-          echo "=== Check patch ==="
-
-          unzip -t "$PATCH"
-
-          unzip -Z -1 "$PATCH" \
-            | grep -Fx "$CLASS"
-
-          echo "=== Check original ==="
-
-          unzip -t "$BUNDLETOOL_JAR"
-
-          unzip -Z -1 "$BUNDLETOOL_JAR" \
-            | grep -Fx "$CLASS"
-
-          echo "=== Extract original bundletool ==="
-
-          (
-            cd "$WORK"
-            jar xf "$BUNDLETOOL_JAR"
-          )
-
-          echo "=== Replace EnumMapper ==="
-
-          (
-            cd "$WORK"
-            jar xf "$OLDPWD/$PATCH"
-          )
-
-          echo "=== Remove stale signatures ==="
-
-          find "$WORK/META-INF" -maxdepth 1 -type f \
-            \( -iname '*.SF' \
-            -o -iname '*.RSA' \
-            -o -iname '*.DSA' \
-            -o -iname '*.EC' \) \
-            -delete
-
-          echo "=== Create patched bundletool ==="
-
-          (
-            cd "$WORK"
-            jar cf "$OUTPUT" .
-          )
-
-          echo "=== Verify patched bundletool ==="
-
-          unzip -t "$OUTPUT" \
-            | tail -n 2
-
-          ORIGINAL_CLASS_SHA=$(
-            unzip -p "$BUNDLETOOL_JAR" "$CLASS" \
-              | sha256sum | cut -d ' ' -f 1
-          )
-
-          PATCH_CLASS_SHA=$(
-            unzip -p "$PATCH" "$CLASS" \
-              | sha256sum | cut -d ' ' -f 1
-          )
-
-          OUTPUT_CLASS_SHA=$(
-            unzip -p "$OUTPUT" "$CLASS" \
-              | sha256sum | cut -d ' ' -f 1
-          )
-
-          {
-            echo "Original class: $ORIGINAL_CLASS_SHA"
-            echo "Patch class:    $PATCH_CLASS_SHA"
-            echo "Output class:   $OUTPUT_CLASS_SHA"
-          } | tee diagnostics/patched-bundletool/class-checksums.txt
-
-          test "$PATCH_CLASS_SHA" = "$OUTPUT_CLASS_SHA"
-
-          if [ "$ORIGINAL_CLASS_SHA" = "$OUTPUT_CLASS_SHA" ]; then
-            echo "ERROR: EnumMapper was not changed"
-            exit 1
-          fi
-
-          echo "=== Inspect patched bytecode ==="
-
-          javap -classpath "$OUTPUT" \
-            -c -p \
-            com.android.tools.build.bundletool.model.utils.EnumMapper \
-            > diagnostics/patched-bundletool/patched-enummapper-bytecode.txt
-
-          if grep -q 'com/google/common/base/Predicates.not' \
-              diagnostics/patched-bundletool/patched-enummapper-bytecode.txt; then
-            echo "ERROR: Old Predicates.not call remains"
-            exit 1
-          fi
-
-          echo "=== Final checksum ==="
-
-          sha256sum "$OUTPUT" \
-            | tee diagnostics/patched-bundletool/SHA256SUMS.txt
-
-          echo "Patched bundletool created successfully."
-
-          rm -rf "$WORK"
+          sha256sum "$GUAVA_JAR" \
+            | tee diagnostics/guava-sha256.txt
 
       - name: Diagnose APK DEX
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p diagnostics
 
           APK=$(find app/build/outputs/apk/debug \
             -maxdepth 1 -type f -name '*.apk' \
             -print -quit)
 
-          test -n "$APK"
-          test -s "$APK"
+          if [ -z "$APK" ] || [ ! -s "$APK" ]; then
+            echo "ERROR: Debug APK not found"
+            exit 1
+          fi
+
+          echo "=== APK DEX files ==="
 
           unzip -Z -1 "$APK" \
             | grep -E '^classes[0-9]*\.dex$' \
             | tee diagnostics/apk-dex-files.txt
+
+          echo "=== APK checksum ==="
 
           sha256sum "$APK" \
             | tee diagnostics/apk-sha256.txt
@@ -292,6 +242,8 @@ jobs:
           JAR="$SDK/platforms/android-35/android.jar"
 
           if [ ! -s "$JAR" ]; then
+            echo "Installing Android API 35..."
+
             SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
             if [ ! -x "$SDKMANAGER" ]; then
@@ -302,18 +254,24 @@ jobs:
             "$SDKMANAGER" "platforms;android-35"
           fi
 
-          test -s "$JAR"
+          if [ ! -s "$JAR" ]; then
+            echo "ERROR: android.jar not found"
+            exit 1
+          fi
 
           mkdir -p android-api-export
+
           cp "$JAR" android-api-export/android.jar
 
           cd android-api-export
+
           sha256sum android.jar > SHA256SUMS.txt
 
           echo "Android API 35 prepared."
           cat SHA256SUMS.txt
 
       - name: Upload Android API 35
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: CodeBox-5-Android-API-35
@@ -322,6 +280,7 @@ jobs:
           retention-days: 30
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: CodeBox-5-debug
@@ -339,9 +298,10 @@ jobs:
           retention-days: 30
 
       - name: Upload patched bundletool
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: CodeBox-5-Patched-Bundletool
-          path: diagnostics/patched-bundletool/
-          if-no-files-found: error
+          path: app/libs/bundletool-patched-1.18.2.jar
+          if-no-files-found: warn
           retention-days: 30

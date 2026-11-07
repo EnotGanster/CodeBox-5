@@ -34,11 +34,10 @@ android {
 }
 
 dependencies {
-
-    // Локальный Java-компилятор ECJ.
+    // Локальный Java-компилятор.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // Компиляция CLASS -> DEX.
+    // Преобразование CLASS -> DEX.
     implementation 'com.android.tools:r8:8.7.18'
 
     // Подпись APK.
@@ -50,16 +49,7 @@ dependencies {
     // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Явно выбираем JRE-вариант Guava.
-    implementation('com.google.guava:guava:33.3.1-jre') {
-        attributes {
-            attribute(
-                org.gradle.api.attributes.java.TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
-                objects.named(
-                    org.gradle.api.attributes.java.TargetJvmEnvironment,
-                    org.gradle.api.attributes.java.TargetJvmEnvironment.STANDARD_JVM
-                )
-            )
-        }
-    }
+    // Guava. Пока используем стандартный выбор
+    // варианта для Android.
+    implementation 'com.google.guava:guava:33.3.1-jre'
 }

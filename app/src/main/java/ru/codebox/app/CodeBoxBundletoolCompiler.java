@@ -8,6 +8,9 @@ import com.google.common.collect.ImmutableList;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.zip.ZipEntry;
@@ -19,10 +22,8 @@ import java.util.zip.ZipFile;
  * Creates an unsigned Android App Bundle from
  * a prepared base module ZIP.
  *
- * Requires:
- * bundletool 1.18.2
- * protobuf-java
- * guava
+ * Includes detailed diagnostics for Guava and
+ * bundletool runtime compatibility.
  *
  * Run on a background thread.
  */
@@ -56,6 +57,7 @@ public final class CodeBoxBundletoolCompiler {
             File moduleZip,
             String projectName
     ) {
+
         StringBuilder log = new StringBuilder(
                 "CodeBox 5 - Bundletool Compiler\n"
         );
@@ -63,8 +65,11 @@ public final class CodeBoxBundletoolCompiler {
         File output = null;
 
         try {
+
             if (context == null) {
-                throw new IOException("Context отсутствует");
+                throw new IOException(
+                        "Context отсутствует"
+                );
             }
 
             if (projectName == null ||
@@ -125,6 +130,44 @@ public final class CodeBoxBundletoolCompiler {
                     .append(output.getAbsolutePath())
                     .append('\n');
 
+            log.append("\n--- Runtime diagnostics ---\n");
+
+            appendClassInfo(
+                    log,
+                    "Bundletool",
+                    BuildBundleCommand.class
+            );
+
+            appendClassInfo(
+                    log,
+                    "Guava ImmutableList",
+                    ImmutableList.class
+            );
+
+            appendClassInfo(
+                    log,
+                    "Guava Predicate",
+                    com.google.common.base.Predicate.class
+            );
+
+            appendClassInfo(
+                    log,
+                    "Java Predicate",
+                    java.util.function.Predicate.class
+            );
+
+            boolean predicateCompatible =
+                    java.util.function.Predicate.class
+                            .isAssignableFrom(
+                                    com.google.common.base.Predicate.class
+                            );
+
+            log.append("Guava Predicate implements Java Predicate: ")
+                    .append(predicateCompatible)
+                    .append('\n');
+
+            appendGuavaPredicateDiagnostics(log);
+
             Path modulePath = moduleZip.toPath();
             Path outputPath = output.toPath();
 
@@ -145,7 +188,11 @@ public final class CodeBoxBundletoolCompiler {
                             .setBundleConfig(config)
                             .build();
 
+            log.append("BuildBundleCommand: создан\n");
+
             command.execute();
+
+            log.append("BuildBundleCommand: выполнен\n");
 
             if (!Files.isRegularFile(outputPath) ||
                     Files.size(outputPath) == 0) {
@@ -227,11 +274,122 @@ public final class CodeBoxBundletoolCompiler {
                     .append(error.getMessage())
                     .append('\n');
 
+            log.append("\n--- Full stack trace ---\n");
+
+            StringWriter writer = new StringWriter();
+            PrintWriter printer = new PrintWriter(writer);
+
+            error.printStackTrace(printer);
+            printer.flush();
+
+            log.append(writer.toString());
+
+            Throwable cause = error.getCause();
+
+            if (cause != null) {
+                log.append("\nRoot cause: ")
+                        .append(cause.getClass().getName())
+                        .append(": ")
+                        .append(cause.getMessage())
+                        .append('\n');
+            }
+
             return new Result(
                     false,
                     null,
                     log.toString()
             );
+        }
+    }
+
+    private static void appendClassInfo(
+            StringBuilder log,
+            String label,
+            Class<?> type
+    ) {
+
+        log.append(label)
+                .append(": ")
+                .append(type.getName())
+                .append('\n');
+
+        try {
+
+            ClassLoader loader = type.getClassLoader();
+
+            log.append("  ClassLoader: ")
+                    .append(loader == null
+                            ? "BOOT"
+                            : loader.getClass().getName())
+                    .append('\n');
+
+            Package pkg = type.getPackage();
+
+            if (pkg != null) {
+
+                log.append("  Version: ")
+                        .append(pkg.getImplementationVersion())
+                        .append('\n');
+            }
+
+        } catch (Throwable error) {
+
+            log.append("  Diagnostic error: ")
+                    .append(error.getClass().getName())
+                    .append('\n');
+        }
+    }
+
+    private static void appendGuavaPredicateDiagnostics(
+            StringBuilder log
+    ) {
+
+        log.append("\n--- Guava Predicate diagnostics ---\n");
+
+        try {
+
+            Class<?> predicateClass =
+                    Class.forName(
+                            "com.google.common.base.Predicates$NotPredicate"
+                    );
+
+            log.append("NotPredicate: FOUND\n");
+
+            appendClassInfo(
+                    log,
+                    "NotPredicate",
+                    predicateClass
+            );
+
+            boolean compatible =
+                    java.util.function.Predicate.class
+                            .isAssignableFrom(predicateClass);
+
+            log.append(
+                    "NotPredicate implements Java Predicate: "
+            ).append(compatible).append('\n');
+
+            Method[] methods =
+                    predicateClass.getDeclaredMethods();
+
+            for (Method method : methods) {
+
+                if ("apply".equals(method.getName())
+                        || "test".equals(method.getName())) {
+
+                    log.append("Method: ")
+                            .append(method.toString())
+                            .append('\n');
+                }
+            }
+
+        } catch (Throwable error) {
+
+            log.append("Predicate diagnostics error: ")
+                    .append(error.getClass().getName())
+                    .append(": ")
+                    .append(error.getMessage())
+                    .append('\n');
         }
     }
 

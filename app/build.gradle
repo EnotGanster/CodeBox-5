@@ -103,6 +103,16 @@ dependencies {
 
     // Supporting Guava dependency.
     implementation 'com.google.guava:failureaccess:1.0.2'
+
+    // -----------------------------------------
+    // AAB JAR signing - Bouncy Castle
+    // -----------------------------------------
+
+    // Cryptographic algorithms and ASN.1.
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+
+    // PKCS#7 / CMS signing support.
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
 }
 
 // ---------------------------------------------

@@ -1,10 +1,10 @@
+
 package ru.codebox.app;
 
 import android.content.Context;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 
-import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
 import org.bouncycastle.cert.jcajce.JcaCertStore;
 import org.bouncycastle.cms.CMSProcessableByteArray;
 import org.bouncycastle.cms.CMSSignedData;
@@ -21,6 +21,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
@@ -33,15 +34,15 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
-import java.util.jar.Manifest;
 
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -49,19 +50,22 @@ import java.util.zip.ZipFile;
 import javax.security.auth.x500.X500Principal;
 
 /**
- * CodeBox 5
+ * CodeBox 5 - Android App Bundle JAR signer.
  *
- * Android App Bundle JAR signer.
+ * Android Keystore RSA + SHA-256 + CMS/PKCS#7.
  *
- * Uses:
- * - Android Keystore
- * - RSA 2048
- * - SHA-256
- * - Bouncy Castle CMS / PKCS#7
+ * Implements JAR signature files:
+ *
+ * META-INF/MANIFEST.MF
+ * META-INF/CODEBOX.SF
+ * META-INF/CODEBOX.RSA
+ *
+ * Includes SHA-256 digests of individual
+ * manifest sections in CODEBOX.SF.
  *
  * Development/test signing only.
  *
- * Call from a background thread.
+ * Run on a background thread.
  */
 public final class CodeBoxAabSigner {
 
@@ -88,6 +92,9 @@ public final class CodeBoxAabSigner {
 
     private static final int BUFFER_SIZE = 8192;
 
+    private static final byte[] CRLF =
+            new byte[]{13, 10};
+
     private CodeBoxAabSigner() {
     }
 
@@ -108,16 +115,32 @@ public final class CodeBoxAabSigner {
         }
     }
 
-    /**
-     * Sign an unsigned AAB using a test key.
-     */
+    private static final class ManifestData {
+
+        final byte[] fullBytes;
+        final byte[] mainBytes;
+
+        final Map<String, byte[]> sections;
+
+        ManifestData(
+                byte[] fullBytes,
+                byte[] mainBytes,
+                Map<String, byte[]> sections
+        ) {
+            this.fullBytes = fullBytes;
+            this.mainBytes = mainBytes;
+            this.sections = sections;
+        }
+    }
+
     public static Result sign(
             Context context,
             File unsignedAab,
             String projectName
     ) {
 
-        StringBuilder log = new StringBuilder();
+        StringBuilder log =
+                new StringBuilder();
 
         log.append("CodeBox 5 - AAB Signer\n");
         log.append("========================\n");
@@ -163,7 +186,9 @@ public final class CodeBoxAabSigner {
             log.append("\n--- Ключ подписи ---\n");
 
             KeyStore keyStore =
-                    KeyStore.getInstance(KEYSTORE_TYPE);
+                    KeyStore.getInstance(
+                            KEYSTORE_TYPE
+                    );
 
             keyStore.load(null);
 
@@ -174,6 +199,8 @@ public final class CodeBoxAabSigner {
                 log.append(
                         "Создан новый тестовый RSA-ключ\n"
                 );
+
+                keyStore.load(null);
 
             } else {
 
@@ -189,7 +216,9 @@ public final class CodeBoxAabSigner {
                     );
 
             Certificate certificate =
-                    keyStore.getCertificate(KEY_ALIAS);
+                    keyStore.getCertificate(
+                            KEY_ALIAS
+                    );
 
             if (privateKey == null) {
 
@@ -198,7 +227,8 @@ public final class CodeBoxAabSigner {
                 );
             }
 
-            if (!(certificate instanceof X509Certificate)) {
+            if (!(certificate
+                    instanceof X509Certificate)) {
 
                 throw new IOException(
                         "Отсутствует сертификат X.509"
@@ -219,96 +249,10 @@ public final class CodeBoxAabSigner {
                     )
                     .append('\n');
 
-            log.append("\n--- JAR Manifest ---\n");
-
-            Manifest manifest = new Manifest();
-
-            Attributes main =
-                    manifest.getMainAttributes();
-
-            main.putValue(
-                    "Manifest-Version",
-                    "1.0"
-            );
-
-            main.putValue(
-                    "Created-By",
-                    "CodeBox 5"
-            );
-
             List<String> entryNames =
-                    new ArrayList<>();
-
-            Set<String> seen =
-                    new HashSet<>();
-
-            try (ZipFile source =
-                         new ZipFile(unsignedAab)) {
-
-                Enumeration<? extends ZipEntry> entries =
-                        source.entries();
-
-                while (entries.hasMoreElements()) {
-
-                    ZipEntry entry =
-                            entries.nextElement();
-
-                    if (entry.isDirectory()) {
-                        continue;
-                    }
-
-                    String name = entry.getName();
-
-                    if (!isSafeEntryName(name)) {
-
-                        throw new IOException(
-                                "Недопустимое имя ZIP-записи: "
-                                        + name
-                        );
-                    }
-
-                    if (name.regionMatches(
-                            true,
-                            0,
-                            "META-INF/",
-                            0,
-                            9
-                    )) {
-
-                        // Do not carry old signature files.
-                        continue;
-                    }
-
-                    if (!seen.add(name)) {
-
-                        throw new IOException(
-                                "Повторяющаяся ZIP-запись: "
-                                        + name
-                        );
-                    }
-
-                    entryNames.add(name);
-
-                    byte[] digest =
-                            digestEntry(
-                                    source,
-                                    entry
-                            );
-
-                    Attributes attributes =
-                            new Attributes();
-
-                    attributes.putValue(
-                            "SHA-256-Digest",
-                            base64(digest)
+                    collectEntryNames(
+                            unsignedAab
                     );
-
-                    manifest.getEntries().put(
-                            name,
-                            attributes
-                    );
-                }
-            }
 
             if (entryNames.isEmpty()) {
 
@@ -317,15 +261,13 @@ public final class CodeBoxAabSigner {
                 );
             }
 
-            Collections.sort(entryNames);
+            log.append("\n--- JAR Manifest ---\n");
 
-            ByteArrayOutputStream manifestStream =
-                    new ByteArrayOutputStream();
-
-            manifest.write(manifestStream);
-
-            byte[] manifestBytes =
-                    manifestStream.toByteArray();
+            ManifestData manifest =
+                    buildManifest(
+                            unsignedAab,
+                            entryNames
+                    );
 
             log.append("Записей: ")
                     .append(entryNames.size())
@@ -333,43 +275,27 @@ public final class CodeBoxAabSigner {
 
             log.append("MANIFEST.MF: подготовлен\n");
 
+            log.append("Размер: ")
+                    .append(manifest.fullBytes.length)
+                    .append(" байт\n");
+
             log.append("\n--- Signature File ---\n");
 
-            byte[] manifestDigest =
-                    MessageDigest.getInstance(
-                            DIGEST_ALGORITHM
-                    ).digest(manifestBytes);
-
-            Manifest signatureManifest =
-                    new Manifest();
-
-            Attributes signatureMain =
-                    signatureManifest.getMainAttributes();
-
-            signatureMain.putValue(
-                    "Signature-Version",
-                    "1.0"
-            );
-
-            signatureMain.putValue(
-                    "Created-By",
-                    "CodeBox 5"
-            );
-
-            signatureMain.putValue(
-                    "SHA-256-Digest-Manifest",
-                    base64(manifestDigest)
-            );
-
-            ByteArrayOutputStream sfStream =
-                    new ByteArrayOutputStream();
-
-            signatureManifest.write(sfStream);
-
             byte[] signatureFileBytes =
-                    sfStream.toByteArray();
+                    buildSignatureFile(
+                            manifest,
+                            entryNames
+                    );
 
             log.append("CODEBOX.SF: подготовлен\n");
+
+            log.append("Подписанных секций: ")
+                    .append(entryNames.size())
+                    .append('\n');
+
+            log.append("Размер: ")
+                    .append(signatureFileBytes.length)
+                    .append(" байт\n");
 
             log.append("\n--- CMS / PKCS#7 ---\n");
 
@@ -395,85 +321,28 @@ public final class CodeBoxAabSigner {
 
             log.append("\n--- Упаковка AAB ---\n");
 
-            if (output.exists() && !output.delete()) {
+            if (output.exists()
+                    && !output.delete()) {
 
                 throw new IOException(
                         "Не удалось удалить старый AAB"
                 );
             }
 
-            try (
-                    ZipFile source =
-                            new ZipFile(unsignedAab);
-
-                    JarOutputStream target =
-                            new JarOutputStream(
-                                    new FileOutputStream(output)
-                            )
-            ) {
-
-                addBytes(
-                        target,
-                        MANIFEST_NAME,
-                        manifestBytes
-                );
-
-                addBytes(
-                        target,
-                        SF_NAME,
-                        signatureFileBytes
-                );
-
-                addBytes(
-                        target,
-                        RSA_NAME,
-                        cmsBytes
-                );
-
-                byte[] buffer =
-                        new byte[BUFFER_SIZE];
-
-                for (String name : entryNames) {
-
-                    ZipEntry original =
-                            source.getEntry(name);
-
-                    if (original == null) {
-
-                        throw new IOException(
-                                "ZIP-запись исчезла: "
-                                        + name
-                        );
-                    }
-
-                    JarEntry destination =
-                            new JarEntry(name);
-
-                    target.putNextEntry(destination);
-
-                    try (InputStream input =
-                                 source.getInputStream(
-                                         original
-                                 )) {
-
-                        int count;
-
-                        while ((count = input.read(buffer))
-                                != -1) {
-
-                            target.write(
-                                    buffer,
-                                    0,
-                                    count
-                            );
-                        }
-                    }
-
-                    target.closeEntry();
-                }
-            }
+            writeSignedAab(
+                    unsignedAab,
+                    output,
+                    entryNames,
+                    manifest.fullBytes,
+                    signatureFileBytes,
+                    cmsBytes
+            );
 
             log.append("AAB сформирован\n");
+
+            log.append("Размер: ")
+                    .append(output.length())
+                    .append(" байт\n");
 
             log.append("\n--- Проверка подписи ---\n");
 
@@ -483,7 +352,13 @@ public final class CodeBoxAabSigner {
                     x509
             );
 
-            log.append("JAR verification: PASSED\n");
+            log.append(
+                    "JAR verification: PASSED\n"
+            );
+
+            log.append(
+                    "Все файлы подтверждены сертификатом\n"
+            );
 
             log.append("\n--- Результат ---\n");
 
@@ -513,7 +388,9 @@ public final class CodeBoxAabSigner {
 
         } catch (Throwable error) {
 
-            if (output != null && output.exists()) {
+            if (output != null
+                    && output.exists()) {
+
                 output.delete();
             }
 
@@ -537,9 +414,425 @@ public final class CodeBoxAabSigner {
         }
     }
 
+    private static List<String> collectEntryNames(
+            File sourceFile
+    ) throws IOException {
+
+        List<String> names =
+                new ArrayList<>();
+
+        Set<String> seen =
+                new HashSet<>();
+
+        try (ZipFile zip =
+                     new ZipFile(sourceFile)) {
+
+            Enumeration<? extends ZipEntry> entries =
+                    zip.entries();
+
+            while (entries.hasMoreElements()) {
+
+                ZipEntry entry =
+                        entries.nextElement();
+
+                String name =
+                        entry.getName();
+
+                if (!isSafeEntryName(name)) {
+
+                    throw new IOException(
+                            "Недопустимое имя ZIP-записи: "
+                                    + name
+                    );
+                }
+
+                if (entry.isDirectory()) {
+                    continue;
+                }
+
+                if (name.regionMatches(
+                        true,
+                        0,
+                        "META-INF/",
+                        0,
+                        9
+                )) {
+
+                    // Remove previous signing metadata.
+                    continue;
+                }
+
+                if (!seen.add(name)) {
+
+                    throw new IOException(
+                            "Повторяющаяся ZIP-запись: "
+                                    + name
+                    );
+                }
+
+                names.add(name);
+            }
+        }
+
+        Collections.sort(names);
+
+        return names;
+    }
+
     /**
-     * Validate input.
+     * Build a manifest with exact CRLF bytes.
+     *
+     * Every file section is saved separately
+     * so CODEBOX.SF can hash those exact bytes.
      */
+    private static ManifestData buildManifest(
+            File sourceFile,
+            List<String> entryNames
+    ) throws Exception {
+
+        ByteArrayOutputStream full =
+                new ByteArrayOutputStream();
+
+        ByteArrayOutputStream main =
+                new ByteArrayOutputStream();
+
+        writeHeader(
+                main,
+                "Manifest-Version",
+                "1.0"
+        );
+
+        writeHeader(
+                main,
+                "Created-By",
+                "CodeBox 5"
+        );
+
+        writeBlankLine(main);
+
+        byte[] mainBytes =
+                main.toByteArray();
+
+        full.write(mainBytes);
+
+        Map<String, byte[]> sections =
+                new HashMap<>();
+
+        try (ZipFile zip =
+                     new ZipFile(sourceFile)) {
+
+            for (String name : entryNames) {
+
+                ZipEntry entry =
+                        zip.getEntry(name);
+
+                if (entry == null) {
+
+                    throw new IOException(
+                            "ZIP-запись исчезла: "
+                                    + name
+                    );
+                }
+
+                byte[] contentDigest =
+                        digestEntry(
+                                zip,
+                                entry
+                        );
+
+                ByteArrayOutputStream section =
+                        new ByteArrayOutputStream();
+
+                writeHeader(
+                        section,
+                        "Name",
+                        name
+                );
+
+                writeHeader(
+                        section,
+                        "SHA-256-Digest",
+                        base64(contentDigest)
+                );
+
+                writeBlankLine(section);
+
+                byte[] sectionBytes =
+                        section.toByteArray();
+
+                sections.put(
+                        name,
+                        sectionBytes
+                );
+
+                full.write(sectionBytes);
+            }
+        }
+
+        return new ManifestData(
+                full.toByteArray(),
+                mainBytes,
+                sections
+        );
+    }
+
+    /**
+     * Build CODEBOX.SF with:
+     *
+     * SHA-256-Digest-Manifest
+     * SHA-256-Digest-Manifest-Main-Attributes
+     *
+     * and a SHA-256 digest for every
+     * individual manifest section.
+     */
+    private static byte[] buildSignatureFile(
+            ManifestData manifest,
+            List<String> entryNames
+    ) throws Exception {
+
+        ByteArrayOutputStream output =
+                new ByteArrayOutputStream();
+
+        writeHeader(
+                output,
+                "Signature-Version",
+                "1.0"
+        );
+
+        writeHeader(
+                output,
+                "Created-By",
+                "CodeBox 5"
+        );
+
+        writeHeader(
+                output,
+                "SHA-256-Digest-Manifest",
+                base64(
+                        sha256(
+                                manifest.fullBytes
+                        )
+                )
+        );
+
+        writeHeader(
+                output,
+                "SHA-256-Digest-Manifest-Main-Attributes",
+                base64(
+                        sha256(
+                                manifest.mainBytes
+                        )
+                )
+        );
+
+        writeBlankLine(output);
+
+        for (String name : entryNames) {
+
+            byte[] section =
+                    manifest.sections.get(name);
+
+            if (section == null) {
+
+                throw new IOException(
+                        "Отсутствует секция манифеста: "
+                                + name
+                );
+            }
+
+            writeHeader(
+                    output,
+                    "Name",
+                    name
+            );
+
+            writeHeader(
+                    output,
+                    "SHA-256-Digest",
+                    base64(
+                            sha256(section)
+                    )
+            );
+
+            writeBlankLine(output);
+        }
+
+        return output.toByteArray();
+    }
+
+    /**
+     * Write a JAR manifest header using
+     * UTF-8, CRLF and 72-byte physical lines.
+     *
+     * Continuation lines begin with a space.
+     */
+    private static void writeHeader(
+            ByteArrayOutputStream output,
+            String name,
+            String value
+    ) throws IOException {
+
+        if (name == null
+                || value == null
+                || name.isEmpty()) {
+
+            throw new IOException(
+                    "Некорректный заголовок манифеста"
+            );
+        }
+
+        if (name.indexOf('\r') >= 0
+                || name.indexOf('\n') >= 0
+                || value.indexOf('\r') >= 0
+                || value.indexOf('\n') >= 0
+                || value.indexOf('\0') >= 0) {
+
+            throw new IOException(
+                    "Недопустимый символ в манифесте"
+            );
+        }
+
+        byte[] bytes =
+                (name + ": " + value).getBytes(
+                        StandardCharsets.UTF_8
+                );
+
+        int offset = 0;
+        int firstLimit = 72;
+
+        while (offset < bytes.length) {
+
+            int limit =
+                    offset == 0
+                            ? firstLimit
+                            : 71;
+
+            int count =
+                    Math.min(
+                            limit,
+                            bytes.length - offset
+                    );
+
+            if (offset > 0) {
+
+                output.write(' ');
+            }
+
+            output.write(
+                    bytes,
+                    offset,
+                    count
+            );
+
+            output.write(CRLF);
+
+            offset += count;
+        }
+    }
+
+    private static void writeBlankLine(
+            ByteArrayOutputStream output
+    ) throws IOException {
+
+        output.write(CRLF);
+    }
+
+    private static byte[] sha256(
+            byte[] bytes
+    ) throws Exception {
+
+        return MessageDigest.getInstance(
+                DIGEST_ALGORITHM
+        ).digest(bytes);
+    }
+
+    private static void writeSignedAab(
+            File sourceFile,
+            File outputFile,
+            List<String> entryNames,
+            byte[] manifestBytes,
+            byte[] signatureFileBytes,
+            byte[] cmsBytes
+    ) throws IOException {
+
+        try (
+                ZipFile source =
+                        new ZipFile(sourceFile);
+
+                JarOutputStream target =
+                        new JarOutputStream(
+                                new FileOutputStream(
+                                        outputFile
+                                )
+                        )
+        ) {
+
+            addBytes(
+                    target,
+                    MANIFEST_NAME,
+                    manifestBytes
+            );
+
+            addBytes(
+                    target,
+                    SF_NAME,
+                    signatureFileBytes
+            );
+
+            addBytes(
+                    target,
+                    RSA_NAME,
+                    cmsBytes
+            );
+
+            byte[] buffer =
+                    new byte[BUFFER_SIZE];
+
+            for (String name : entryNames) {
+
+                ZipEntry original =
+                        source.getEntry(name);
+
+                if (original == null) {
+
+                    throw new IOException(
+                            "ZIP-запись исчезла: "
+                                    + name
+                    );
+                }
+
+                JarEntry destination =
+                        new JarEntry(name);
+
+                target.putNextEntry(
+                        destination
+                );
+
+                try (
+                        InputStream input =
+                                source.getInputStream(
+                                        original
+                                )
+                ) {
+
+                    int count;
+
+                    while ((count = input.read(buffer))
+                            != -1) {
+
+                        target.write(
+                                buffer,
+                                0,
+                                count
+                        );
+                    }
+                }
+
+                target.closeEntry();
+            }
+        }
+    }
+
     private static void validateInputs(
             Context context,
             File source,
@@ -573,9 +866,6 @@ public final class CodeBoxAabSigner {
         }
     }
 
-    /**
-     * Create RSA key in Android Keystore.
-     */
     private static void createTestKey()
             throws Exception {
 
@@ -605,15 +895,16 @@ public final class CodeBoxAabSigner {
                         )
                         .build();
 
-        generator.initialize(specification);
+        generator.initialize(
+                specification
+        );
 
         generator.generateKeyPair();
     }
 
     /**
-     * Create detached CMS SignedData.
-     *
-     * The signed content is CODEBOX.SF.
+     * Create detached CMS SignedData
+     * for CODEBOX.SF.
      */
     private static byte[] createCmsSignature(
             byte[] signatureFile,
@@ -627,12 +918,13 @@ public final class CodeBoxAabSigner {
         ContentSigner contentSigner =
                 new JcaContentSignerBuilder(
                         SIGNATURE_ALGORITHM
-                )
-                        .build(privateKey);
+                ).build(privateKey);
 
         DigestCalculatorProvider digestProvider =
                 new JcaDigestCalculatorProviderBuilder()
-                        .setProvider(bcProvider)
+                        .setProvider(
+                                bcProvider
+                        )
                         .build();
 
         JcaSignerInfoGeneratorBuilder signerBuilder =
@@ -650,13 +942,12 @@ public final class CodeBoxAabSigner {
                 )
         );
 
-        List<X509Certificate> certificates =
-                Collections.singletonList(
-                        certificate
-                );
-
         generator.addCertificates(
-                new JcaCertStore(certificates)
+                new JcaCertStore(
+                        Collections.singletonList(
+                                certificate
+                        )
+                )
         );
 
         CMSProcessableByteArray content =
@@ -674,8 +965,11 @@ public final class CodeBoxAabSigner {
     }
 
     /**
-     * Verify all content entries with the
-     * platform's standard JAR verifier.
+     * Verify every signed content entry.
+     *
+     * The platform JAR verifier must attach
+     * the expected certificate after the
+     * entire entry has been read.
      */
     private static void verifySignedJar(
             File signedAab,
@@ -691,11 +985,13 @@ public final class CodeBoxAabSigner {
             );
         }
 
-        try (JarFile jar =
-                     new JarFile(
-                             signedAab,
-                             true
-                     )) {
+        try (
+                JarFile jar =
+                        new JarFile(
+                                signedAab,
+                                true
+                        )
+        ) {
 
             if (jar.getEntry(MANIFEST_NAME) == null
                     || jar.getEntry(SF_NAME) == null
@@ -722,12 +1018,14 @@ public final class CodeBoxAabSigner {
                     );
                 }
 
-                try (InputStream input =
-                             jar.getInputStream(entry)) {
+                try (
+                        InputStream input =
+                                jar.getInputStream(entry)
+                ) {
 
                     while (input.read(buffer) != -1) {
-                        // Read completely to trigger
-                        // signature verification.
+                        // Reading to EOF triggers
+                        // JAR verification.
                     }
                 }
 
@@ -743,7 +1041,8 @@ public final class CodeBoxAabSigner {
                     );
                 }
 
-                boolean matchingCertificate = false;
+                boolean matchingCertificate =
+                        false;
 
                 for (Certificate certificate :
                         certificates) {
@@ -769,9 +1068,6 @@ public final class CodeBoxAabSigner {
         }
     }
 
-    /**
-     * SHA-256 digest of ZIP entry contents.
-     */
     private static byte[] digestEntry(
             ZipFile zip,
             ZipEntry entry
@@ -785,8 +1081,10 @@ public final class CodeBoxAabSigner {
         byte[] buffer =
                 new byte[BUFFER_SIZE];
 
-        try (InputStream input =
-                     zip.getInputStream(entry)) {
+        try (
+                InputStream input =
+                        zip.getInputStream(entry)
+        ) {
 
             int count;
 
@@ -804,9 +1102,6 @@ public final class CodeBoxAabSigner {
         return digest.digest();
     }
 
-    /**
-     * Add a byte array to JAR.
-     */
     private static void addBytes(
             JarOutputStream output,
             String name,
@@ -823,9 +1118,6 @@ public final class CodeBoxAabSigner {
         output.closeEntry();
     }
 
-    /**
-     * Base64 for manifest digest fields.
-     */
     private static String base64(
             byte[] data
     ) {
@@ -834,9 +1126,6 @@ public final class CodeBoxAabSigner {
                 .encodeToString(data);
     }
 
-    /**
-     * Reject dangerous ZIP entry names.
-     */
     private static boolean isSafeEntryName(
             String name
     ) {
@@ -850,7 +1139,8 @@ public final class CodeBoxAabSigner {
             return false;
         }
 
-        String[] parts = name.split("/");
+        String[] parts =
+                name.split("/");
 
         for (String part : parts) {
 

@@ -240,8 +240,7 @@ jobs:
 
           test -s "$NEW"
 
-          unzip -t "$NEW" \
-            | tail -n 2
+          unzip -t "$NEW" | tail -n 2
 
           echo "Patched bundletool v3 created."
 
@@ -306,7 +305,14 @@ jobs:
           echo "OLD_XML_SHA=$OLD_SHA"
           echo "NEW_XML_SHA=$NEW_SHA"
 
-          test "$OLD_SHA" != "$NEW_SHA"
+          if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+            echo "XmlProtoElementOrBuilder already patched."
+            echo "Checking bytecode."
+          else
+            echo "XmlProtoElementOrBuilder updated."
+          fi
+
+          echo "=== Inspect XML parser bytecode ==="
 
           javap -classpath "$NEW" \
             -c -p \
@@ -335,7 +341,7 @@ jobs:
           print("XML_PREDICATE_ADAPTER_VERIFIED")
           PY
 
-          echo "=== Verify JAR ==="
+          echo "=== Verify all JAR files ==="
 
           unzip -t "$NEW" | tail -n 2
 

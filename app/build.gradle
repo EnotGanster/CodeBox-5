@@ -22,7 +22,6 @@ android {
 
     packaging {
         jniLibs {
-            // Извлекать libaapt2.so из APK.
             useLegacyPackaging = true
         }
     }
@@ -33,51 +32,79 @@ android {
     }
 }
 
-// --------------------------------------------------
-// CodeBox 5 — зависимости bundletool
-// --------------------------------------------------
+// ---------------------------------------------
+// CodeBox 5 - bundletool dependencies
+// ---------------------------------------------
 
 configurations {
     bundletoolDependencies {
         transitive = true
     }
+
+    // Download the JRE artifact separately.
+    guavaJreJar {
+        transitive = false
+        canBeConsumed = false
+        canBeResolved = true
+
+        attributes {
+            attribute(
+                org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE,
+                objects.named(
+                    org.gradle.api.attributes.Usage,
+                    org.gradle.api.attributes.Usage.JAVA_RUNTIME
+                )
+            )
+
+            attribute(
+                org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+                objects.named(
+                    org.gradle.api.attributes.LibraryElements,
+                    org.gradle.api.attributes.LibraryElements.JAR
+                )
+            )
+        }
+    }
 }
 
-// --------------------------------------------------
-// Основные зависимости
-// --------------------------------------------------
+// ---------------------------------------------
+// Main dependencies
+// ---------------------------------------------
 
 dependencies {
 
-    // Локальный Java-компилятор.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // Преобразование CLASS -> DEX.
     implementation 'com.android.tools:r8:8.7.18'
 
-    // Подпись APK.
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // Исправленный bundletool 1.18.2.
     implementation files(
         'libs/bundletool-patched-1.18.2.jar'
     )
 
-    // Транзитивные зависимости bundletool.
     bundletoolDependencies(
         'com.android.tools.build:bundletool:1.18.2'
     )
 
-    // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Guava JRE.
     implementation 'com.google.guava:guava:33.3.1-jre'
+
+    // Explicit JRE artifact classifier.
+    guavaJreJar(
+        'com.google.guava:guava:33.3.1-jre@jar'
+    )
+
+    // Include the separately resolved JAR in the APK.
+    implementation files({
+        configurations.guavaJreJar.files
+    })
 }
 
-// --------------------------------------------------
-// Перенос зависимостей bundletool
-// --------------------------------------------------
+// ---------------------------------------------
+// Transfer bundletool dependencies
+// ---------------------------------------------
 
 def bundletoolDependencyArtifacts =
     configurations.bundletoolDependencies
@@ -125,9 +152,9 @@ afterEvaluate {
     }
 }
 
-// --------------------------------------------------
-// Подробная диагностика Guava
-// --------------------------------------------------
+// ---------------------------------------------
+// Guava diagnostics
+// ---------------------------------------------
 
 tasks.register('diagnoseGuava') {
 
@@ -135,40 +162,55 @@ tasks.register('diagnoseGuava') {
 
         println ''
         println '========================================'
-        println 'CODEBOX 5 - GUAVA DIAGNOSTICS'
+        println 'CODEBOX 5 - GUAVA JRE DIAGNOSTICS'
         println '========================================'
 
-        println 'GUAVA_REQUESTED: 33.3.1-jre'
+        def targetClass =
+            'com/google/common/collect/Streams.class'
 
-        def runtime =
-            configurations.getByName('debugRuntimeClasspath')
+        def jreFiles =
+            configurations.guavaJreJar.resolve()
+
+        boolean jreStreamsFound = false
 
         println ''
-        println '--- Resolved components ---'
+        println '--- Explicit JRE artifacts ---'
 
-        def components =
-            runtime.incoming.resolutionResult.allComponents
+        jreFiles.each { file ->
 
-        components.each { component ->
+            println "GUAVA_JRE_FILE: ${file.name}"
+            println "GUAVA_JRE_SIZE: ${file.length()}"
 
-            def module = component.moduleVersion
+            if (file.name.endsWith('.jar')) {
 
-            if (module != null
-                    && module.group.toLowerCase()
-                        .contains('guava')) {
+                def zip = new java.util.zip.ZipFile(file)
 
-                println "GUAVA_RESOLVED: ${module.group}:${module.name}:${module.version}"
+                try {
+                    if (zip.getEntry(targetClass) != null) {
+                        jreStreamsFound = true
+                        println 'GUAVA_JRE_STREAMS: FOUND'
+                    } else {
+                        println 'GUAVA_JRE_STREAMS: MISSING'
+                    }
+                } finally {
+                    zip.close()
+                }
             }
         }
 
         println ''
-        println '--- Resolved artifacts ---'
+        println '--- Android runtime artifacts ---'
+
+        def runtime =
+            configurations.getByName(
+                'debugRuntimeClasspath'
+            )
 
         def artifacts =
             runtime.resolvedConfiguration.resolvedArtifacts
 
         int guavaArtifactCount = 0
-        boolean streamsFound = false
+        boolean runtimeStreamsFound = false
 
         artifacts.each { artifact ->
 
@@ -181,7 +223,7 @@ tasks.register('diagnoseGuava') {
                 guavaArtifactCount++
 
                 println "GUAVA_ARTIFACT: ${id}"
-                println "GUAVA_FILE: ${artifact.file.absolutePath}"
+                println "GUAVA_FILE: ${artifact.file.name}"
                 println "GUAVA_FILE_SIZE: ${artifact.file.length()}"
 
                 if (artifact.file.name.endsWith('.jar')) {
@@ -191,29 +233,15 @@ tasks.register('diagnoseGuava') {
                     )
 
                     try {
-
-                        def entry = zip.getEntry(
-                            'com/google/common/collect/Streams.class'
-                        )
-
-                        if (entry != null) {
-
-                            streamsFound = true
-
+                        if (zip.getEntry(targetClass) != null) {
+                            runtimeStreamsFound = true
                             println 'GUAVA_STREAMS_IN_ARTIFACT: FOUND'
-
                         } else {
-
                             println 'GUAVA_STREAMS_IN_ARTIFACT: MISSING'
                         }
-
                     } finally {
                         zip.close()
                     }
-
-                } else {
-
-                    println 'GUAVA_ARTIFACT_FORMAT: NOT_JAR'
                 }
             }
         }
@@ -222,25 +250,25 @@ tasks.register('diagnoseGuava') {
         println '--- Final result ---'
 
         println "GUAVA_ARTIFACT_COUNT: ${guavaArtifactCount}"
+        println "GUAVA_JRE_STREAMS_FOUND: ${jreStreamsFound}"
+        println "GUAVA_RUNTIME_STREAMS_FOUND: ${runtimeStreamsFound}"
 
-        if (streamsFound) {
-            println 'GUAVA_STREAMS: FOUND'
-        } else {
-            println 'GUAVA_STREAMS: NOT_FOUND_IN_SCANNED_ARTIFACTS'
+        if (!jreStreamsFound) {
+            throw new GradleException(
+                'Guava JRE Streams.class is missing'
+            )
         }
 
-        println 'GUAVA_DIAGNOSTICS: COMPLETED'
+        println 'GUAVA_DIAGNOSTICS: PASSED'
         println '========================================'
         println ''
     }
 }
 
-// --------------------------------------------------
-// Запуск диагностики при сборке APK
-// --------------------------------------------------
+// ---------------------------------------------
+// Run diagnostics before APK build
+// ---------------------------------------------
 
-// Не обращаемся к assembleDebug через tasks.named()
-// во время первоначальной настройки Gradle.
 tasks.matching {
     it.name == 'assembleDebug'
 }.configureEach {

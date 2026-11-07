@@ -33,73 +33,76 @@ android {
 }
 
 // ---------------------------------------------
-// CodeBox 5 - bundletool dependencies
+// CodeBox 5 - dependency configurations
 // ---------------------------------------------
 
 configurations {
+
     bundletoolDependencies {
         transitive = true
     }
 
-    // Download the JRE artifact separately.
     guavaJreJar {
         transitive = false
         canBeConsumed = false
         canBeResolved = true
-
-        attributes {
-            attribute(
-                org.gradle.api.attributes.Usage.USAGE_ATTRIBUTE,
-                objects.named(
-                    org.gradle.api.attributes.Usage,
-                    org.gradle.api.attributes.Usage.JAVA_RUNTIME
-                )
-            )
-
-            attribute(
-                org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
-                objects.named(
-                    org.gradle.api.attributes.LibraryElements,
-                    org.gradle.api.attributes.LibraryElements.JAR
-                )
-            )
-        }
     }
 }
 
 // ---------------------------------------------
-// Main dependencies
+// Prevent duplicate Guava classes
+// ---------------------------------------------
+
+configurations.configureEach { config ->
+
+    if (config.name != 'guavaJreJar'
+            && config.name != 'bundletoolDependencies') {
+
+        exclude group: 'com.google.guava',
+                module: 'guava'
+    }
+}
+
+// ---------------------------------------------
+// Dependencies
 // ---------------------------------------------
 
 dependencies {
 
+    // Java compiler.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
+    // CLASS to DEX.
     implementation 'com.android.tools:r8:8.7.18'
 
+    // APK signing.
     implementation 'com.android.tools.build:apksig:8.7.3'
 
+    // Patched bundletool.
     implementation files(
         'libs/bundletool-patched-1.18.2.jar'
     )
 
+    // Bundletool transitive dependencies.
     bundletoolDependencies(
         'com.android.tools.build:bundletool:1.18.2'
     )
 
+    // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    implementation 'com.google.guava:guava:33.3.1-jre'
-
-    // Explicit JRE artifact classifier.
+    // Full JRE Guava JAR.
     guavaJreJar(
         'com.google.guava:guava:33.3.1-jre@jar'
     )
 
-    // Include the separately resolved JAR in the APK.
+    // Include only the full JRE Guava.
     implementation files({
         configurations.guavaJreJar.files
     })
+
+    // Supporting Guava dependency.
+    implementation 'com.google.guava:failureaccess:1.0.2'
 }
 
 // ---------------------------------------------
@@ -138,7 +141,10 @@ afterEvaluate {
                         if (module != null
                                 && !(module.group ==
                                     'com.android.tools.build'
-                                    && module.name == 'bundletool')) {
+                                    && module.name == 'bundletool')
+                                && !(module.group ==
+                                    'com.google.guava'
+                                    && module.name == 'guava')) {
 
                             dependencies.add(
                                 'implementation',
@@ -162,7 +168,7 @@ tasks.register('diagnoseGuava') {
 
         println ''
         println '========================================'
-        println 'CODEBOX 5 - GUAVA JRE DIAGNOSTICS'
+        println 'CODEBOX 5 - GUAVA DIAGNOSTICS'
         println '========================================'
 
         def targetClass =
@@ -171,10 +177,10 @@ tasks.register('diagnoseGuava') {
         def jreFiles =
             configurations.guavaJreJar.resolve()
 
-        boolean jreStreamsFound = false
+        boolean streamsFound = false
 
         println ''
-        println '--- Explicit JRE artifacts ---'
+        println '--- JRE Guava ---'
 
         jreFiles.each { file ->
 
@@ -186,12 +192,17 @@ tasks.register('diagnoseGuava') {
                 def zip = new java.util.zip.ZipFile(file)
 
                 try {
+
                     if (zip.getEntry(targetClass) != null) {
-                        jreStreamsFound = true
+
+                        streamsFound = true
                         println 'GUAVA_JRE_STREAMS: FOUND'
+
                     } else {
+
                         println 'GUAVA_JRE_STREAMS: MISSING'
                     }
+
                 } finally {
                     zip.close()
                 }
@@ -199,7 +210,7 @@ tasks.register('diagnoseGuava') {
         }
 
         println ''
-        println '--- Android runtime artifacts ---'
+        println '--- Android runtime ---'
 
         def runtime =
             configurations.getByName(
@@ -209,53 +220,36 @@ tasks.register('diagnoseGuava') {
         def artifacts =
             runtime.resolvedConfiguration.resolvedArtifacts
 
-        int guavaArtifactCount = 0
-        boolean runtimeStreamsFound = false
+        boolean androidGuavaFound = false
 
         artifacts.each { artifact ->
 
             def id = artifact.moduleVersion.id
 
-            if (id.group.toLowerCase().contains('guava')
-                    || artifact.name.toLowerCase()
-                        .contains('guava')) {
+            if (id.group == 'com.google.guava'
+                    && id.name == 'guava') {
 
-                guavaArtifactCount++
+                androidGuavaFound = true
 
-                println "GUAVA_ARTIFACT: ${id}"
-                println "GUAVA_FILE: ${artifact.file.name}"
-                println "GUAVA_FILE_SIZE: ${artifact.file.length()}"
-
-                if (artifact.file.name.endsWith('.jar')) {
-
-                    def zip = new java.util.zip.ZipFile(
-                        artifact.file
-                    )
-
-                    try {
-                        if (zip.getEntry(targetClass) != null) {
-                            runtimeStreamsFound = true
-                            println 'GUAVA_STREAMS_IN_ARTIFACT: FOUND'
-                        } else {
-                            println 'GUAVA_STREAMS_IN_ARTIFACT: MISSING'
-                        }
-                    } finally {
-                        zip.close()
-                    }
-                }
+                println "UNEXPECTED_GUAVA: ${artifact.file.name}"
             }
         }
 
         println ''
         println '--- Final result ---'
 
-        println "GUAVA_ARTIFACT_COUNT: ${guavaArtifactCount}"
-        println "GUAVA_JRE_STREAMS_FOUND: ${jreStreamsFound}"
-        println "GUAVA_RUNTIME_STREAMS_FOUND: ${runtimeStreamsFound}"
+        println "GUAVA_STREAMS_FOUND: ${streamsFound}"
+        println "ANDROID_GUAVA_FOUND: ${androidGuavaFound}"
 
-        if (!jreStreamsFound) {
+        if (!streamsFound) {
             throw new GradleException(
-                'Guava JRE Streams.class is missing'
+                'Full Guava JRE is missing Streams.class'
+            )
+        }
+
+        if (androidGuavaFound) {
+            throw new GradleException(
+                'Duplicate Guava dependency detected'
             )
         }
 
@@ -266,7 +260,7 @@ tasks.register('diagnoseGuava') {
 }
 
 // ---------------------------------------------
-// Run diagnostics before APK build
+// Diagnostics before APK build
 // ---------------------------------------------
 
 tasks.matching {

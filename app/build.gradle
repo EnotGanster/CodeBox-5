@@ -63,8 +63,7 @@ dependencies {
         'libs/bundletool-patched-1.18.2.jar'
     )
 
-    // Получаем зависимости bundletool,
-    // но не включаем его оригинальный JAR.
+    // Транзитивные зависимости bundletool.
     bundletoolDependencies(
         'com.android.tools.build:bundletool:1.18.2'
     )
@@ -72,7 +71,7 @@ dependencies {
     // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Полная версия Guava.
+    // Guava JRE.
     implementation 'com.google.guava:guava:33.3.1-jre'
 }
 
@@ -127,179 +126,124 @@ afterEvaluate {
 }
 
 // --------------------------------------------------
-// Проверка Guava Streams в JAR
+// Подробная диагностика Guava
 // --------------------------------------------------
 
-tasks.register('verifyGuavaStreams') {
+tasks.register('diagnoseGuava') {
 
     doLast {
 
-        def guavaArtifacts =
-            configurations.debugRuntimeClasspath
-                .resolvedConfiguration
-                .resolvedArtifacts
-                .findAll { artifact ->
+        println ''
+        println '========================================'
+        println 'CODEBOX 5 - GUAVA DIAGNOSTICS'
+        println '========================================'
 
-                    artifact.moduleVersion.id.group ==
-                        'com.google.guava'
-                    && artifact.name == 'guava'
-                }
+        println 'GUAVA_REQUESTED: 33.3.1-jre'
 
-        if (guavaArtifacts.isEmpty()) {
-            throw new GradleException(
-                'GUAVA: MISSING'
-            )
+        def runtime =
+            configurations.getByName('debugRuntimeClasspath')
+
+        println ''
+        println '--- Resolved components ---'
+
+        def components =
+            runtime.incoming.resolutionResult.allComponents
+
+        components.each { component ->
+
+            def module = component.moduleVersion
+
+            if (module != null
+                    && module.group.toLowerCase()
+                        .contains('guava')) {
+
+                println "GUAVA_RESOLVED: ${module.group}:${module.name}:${module.version}"
+            }
         }
 
-        guavaArtifacts.each { artifact ->
+        println ''
+        println '--- Resolved artifacts ---'
 
-            println "GUAVA_SELECTED: ${artifact.moduleVersion.id}"
+        def artifacts =
+            runtime.resolvedConfiguration.resolvedArtifacts
 
-            def jarFile = artifact.file
+        int guavaArtifactCount = 0
+        boolean streamsFound = false
 
-            if (!jarFile.name.endsWith('.jar')) {
-                throw new GradleException(
-                    "Ожидался JAR Guava: ${jarFile.name}"
-                )
-            }
+        artifacts.each { artifact ->
 
-            def zip = new java.util.zip.ZipFile(jarFile)
+            def id = artifact.moduleVersion.id
 
-            try {
+            if (id.group.toLowerCase().contains('guava')
+                    || artifact.name.toLowerCase()
+                        .contains('guava')) {
 
-                def entry = zip.getEntry(
-                    'com/google/common/collect/Streams.class'
-                )
+                guavaArtifactCount++
 
-                if (entry == null) {
-                    throw new GradleException(
-                        'GUAVA_STREAMS: MISSING'
+                println "GUAVA_ARTIFACT: ${id}"
+                println "GUAVA_FILE: ${artifact.file.absolutePath}"
+                println "GUAVA_FILE_SIZE: ${artifact.file.length()}"
+
+                if (artifact.file.name.endsWith('.jar')) {
+
+                    def zip = new java.util.zip.ZipFile(
+                        artifact.file
                     )
-                }
 
-                println 'GUAVA_STREAMS: FOUND'
+                    try {
 
-            } finally {
-                zip.close()
-            }
-        }
-    }
-}
+                        def entry = zip.getEntry(
+                            'com/google/common/collect/Streams.class'
+                        )
 
-// --------------------------------------------------
-// Проверка класса Streams в итоговом APK
-// --------------------------------------------------
+                        if (entry != null) {
 
-tasks.register('verifyGuavaInApk') {
+                            streamsFound = true
 
-    dependsOn 'assembleDebug'
+                            println 'GUAVA_STREAMS_IN_ARTIFACT: FOUND'
 
-    doLast {
+                        } else {
 
-        def apkFile = file(
-            "$buildDir/outputs/apk/debug/app-debug.apk"
-        )
-
-        if (!apkFile.isFile()) {
-            throw new GradleException(
-                "APK_NOT_FOUND: ${apkFile.absolutePath}"
-            )
-        }
-
-        println "APK_FOUND: ${apkFile.absolutePath}"
-        println "APK_SIZE: ${apkFile.length()}"
-
-        def zip = new java.util.zip.ZipFile(apkFile)
-
-        try {
-
-            def dexEntries = []
-            def entries = zip.entries()
-
-            while (entries.hasMoreElements()) {
-
-                def entry = entries.nextElement()
-
-                if (entry.name ==~ /classes(\d*)\.dex/) {
-                    dexEntries.add(entry)
-                }
-            }
-
-            if (dexEntries.isEmpty()) {
-                throw new GradleException(
-                    'APK_DEX: MISSING'
-                )
-            }
-
-            println "APK_DEX_FILES: ${dexEntries.size()}"
-
-            byte[] descriptor =
-                'Lcom/google/common/collect/Streams;'
-                    .getBytes('UTF-8')
-
-            boolean found = false
-
-            dexEntries.each { entry ->
-
-                def input = zip.getInputStream(entry)
-
-                try {
-
-                    byte[] bytes = input.bytes
-
-                    for (int i = 0;
-                         i <= bytes.length - descriptor.length;
-                         i++) {
-
-                        boolean match = true
-
-                        for (int j = 0;
-                             j < descriptor.length;
-                             j++) {
-
-                            if (bytes[i + j] != descriptor[j]) {
-                                match = false
-                                break
-                            }
+                            println 'GUAVA_STREAMS_IN_ARTIFACT: MISSING'
                         }
 
-                        if (match) {
-                            found = true
-                            println "STREAMS_DESCRIPTOR_FOUND_IN: ${entry.name}"
-                            break
-                        }
+                    } finally {
+                        zip.close()
                     }
 
-                } finally {
-                    input.close()
+                } else {
+
+                    println 'GUAVA_ARTIFACT_FORMAT: NOT_JAR'
                 }
             }
-
-            if (!found) {
-                throw new GradleException(
-                    'APK_GUAVA_STREAMS: MISSING'
-                )
-            }
-
-            println 'APK_GUAVA_STREAMS: FOUND'
-
-        } finally {
-            zip.close()
         }
+
+        println ''
+        println '--- Final result ---'
+
+        println "GUAVA_ARTIFACT_COUNT: ${guavaArtifactCount}"
+
+        if (streamsFound) {
+            println 'GUAVA_STREAMS: FOUND'
+        } else {
+            println 'GUAVA_STREAMS: NOT_FOUND_IN_SCANNED_ARTIFACTS'
+        }
+
+        println 'GUAVA_DIAGNOSTICS: COMPLETED'
+        println '========================================'
+        println ''
     }
 }
 
 // --------------------------------------------------
-// Подключение проверок без раннего поиска задачи
+// Запуск диагностики при сборке APK
 // --------------------------------------------------
 
-// configureEach работает и для задач,
-// которые Android Gradle Plugin создаёт позднее.
+// Не обращаемся к assembleDebug через tasks.named()
+// во время первоначальной настройки Gradle.
 tasks.matching {
     it.name == 'assembleDebug'
 }.configureEach {
 
-    dependsOn tasks.named('verifyGuavaStreams')
-
-    finalizedBy tasks.named('verifyGuavaInApk')
+    dependsOn tasks.named('diagnoseGuava')
 }

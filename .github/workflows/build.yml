@@ -27,14 +27,14 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Diagnose Guava dependencies
+      - name: Diagnose Guava bytecode
         shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p diagnostics
 
-          echo "=== Guava dependency insight ==="
+          echo "=== Resolve Guava ==="
 
           gradle --no-daemon \
             :app:dependencyInsight \
@@ -42,22 +42,70 @@ jobs:
             --dependency com.google.guava:guava \
             | tee diagnostics/guava-dependency-insight.txt
 
-          echo "=== Runtime dependency tree ==="
+          echo "=== Locate Guava JAR ==="
 
-          gradle --no-daemon \
-            :app:dependencies \
-            --configuration debugRuntimeClasspath \
-            | tee diagnostics/debug-runtime-dependencies.txt
+          GUARDED_JAR=$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.google.guava/guava/33.3.1-jre" \
+            -type f -name 'guava-33.3.1-jre.jar' \
+            -print -quit)
 
-          echo "=== Guava references ==="
+          if [ -z "$GUARDED_JAR" ]; then
+            echo "ERROR: Guava JAR not found"
+            exit 1
+          fi
 
-          grep -i -E \
-            'guava|listenablefuture|failureaccess|bundletool' \
-            diagnostics/debug-runtime-dependencies.txt \
-            || true
+          echo "Guava JAR: $GUARDED_JAR" \
+            | tee diagnostics/guava-jar-path.txt
+
+          echo "=== Guava Predicate ==="
+
+          javap -classpath "$GUARDED_JAR" \
+            -p com.google.common.base.Predicate \
+            | tee diagnostics/guava-predicate.txt
+
+          echo "=== Guava NotPredicate ==="
+
+          javap -classpath "$GUARDED_JAR" \
+            -p 'com.google.common.base.Predicates$NotPredicate' \
+            | tee diagnostics/guava-not-predicate.txt
 
       - name: Build Debug APK
         run: gradle --no-daemon assembleDebug
+
+      - name: Diagnose APK DEX
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK=$(find app/build/outputs/apk/debug \
+            -maxdepth 1 -type f -name '*.apk' \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: Debug APK not found"
+            exit 1
+          fi
+
+          echo "=== APK DEX entries ==="
+
+          unzip -Z -1 "$APK" \
+            | grep -E '^classes[0-9]*\.dex$' \
+            | tee diagnostics/apk-dex-files.txt
+
+          echo "=== DEX inspection instructions ==="
+
+          {
+            echo "APK: $APK"
+            echo "The original Guava class signatures are in:"
+            echo "guava-predicate.txt"
+            echo "guava-not-predicate.txt"
+            echo
+            echo "Runtime verification from CodeBox:"
+            echo "Guava Predicate implements Java Predicate: false"
+            echo "NotPredicate implements Java Predicate: false"
+            echo
+            echo "This step verifies APK DEX presence only."
+            echo "It does not yet inspect DEX class interfaces."
+          } | tee diagnostics/apk-dex-report.txt
 
       - name: Prepare Android API 35
         shell: bash
@@ -74,9 +122,6 @@ jobs:
           JAR="$SDK/platforms/android-35/android.jar"
 
           if [ ! -s "$JAR" ]; then
-            echo "Android API 35 is missing."
-            echo "Installing Android SDK Platform 35..."
-
             SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
             if [ ! -x "$SDKMANAGER" ]; then

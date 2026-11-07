@@ -60,8 +60,11 @@ public final class ProjectTemplates {
     }
 
     public static String manifest(String projectName) {
+        String packageName = getPackageName(projectName);
+
         return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    package=\"" + packageName + "\">\n\n"
                 + "    <application\n"
                 + "        android:label=\"" + projectName + "\"\n"
                 + "        android:theme=\"@android:style/Theme.Material.Light.NoActionBar\">\n\n"

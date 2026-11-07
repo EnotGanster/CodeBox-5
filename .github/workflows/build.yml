@@ -104,7 +104,7 @@ jobs:
             :app:inspectRuntimeLibraries \
             | tee diagnostics/resolved-libraries.txt
 
-          GUARDED_JAR=$(sed -n \
+          GUAVA_JAR=$(sed -n \
             's/^GUAVA_JAR=//p' \
             diagnostics/resolved-libraries.txt \
             | tail -n 1)
@@ -114,175 +114,148 @@ jobs:
             diagnostics/resolved-libraries.txt \
             | tail -n 1)
 
-          test -s "$GUARDED_JAR"
+          test -s "$GUAVA_JAR"
           test -s "$BUNDLETOOL_JAR"
 
-          echo "=== Guava Predicate ==="
-
-          javap -classpath "$GUARDED_JAR" \
+          javap -classpath "$GUAVA_JAR" \
             -p com.google.common.base.Predicate \
-            | tee diagnostics/guava-predicate.txt
+            > diagnostics/guava-predicate.txt
 
-          echo "=== Guava NotPredicate ==="
-
-          javap -classpath "$GUARDED_JAR" \
+          javap -classpath "$GUAVA_JAR" \
             -p 'com.google.common.base.Predicates$NotPredicate' \
-            | tee diagnostics/guava-not-predicate.txt
-
-          echo "=== Original EnumMapper ==="
+            > diagnostics/guava-not-predicate.txt
 
           javap -classpath "$BUNDLETOOL_JAR" \
             -c -p \
             com.android.tools.build.bundletool.model.utils.EnumMapper \
-            | tee diagnostics/bundletool-enummapper-bytecode.txt
-
-          echo "=== JAR checksums ==="
+            > diagnostics/bundletool-enummapper-bytecode.txt
 
           {
-            sha256sum "$GUARDED_JAR"
+            sha256sum "$GUAVA_JAR"
             sha256sum "$BUNDLETOOL_JAR"
-          } | tee diagnostics/library-checksums.txt
+          } > diagnostics/library-checksums.txt
 
-      - name: Compile EnumMapper compatibility candidate
+      - name: Build patched bundletool JAR
         shell: bash
         run: |
           set -euo pipefail
 
-          mkdir -p diagnostics/patch-src
-          mkdir -p diagnostics/patch-classes
-          mkdir -p diagnostics/patch-output
-
-          GUARDED_JAR=$(sed -n \
-            's/^GUAVA_JAR=//p' \
-            diagnostics/resolved-libraries.txt \
-            | tail -n 1)
+          PATCH="app/libs/enummapper-candidate.jar"
 
           BUNDLETOOL_JAR=$(sed -n \
             's/^BUNDLETOOL_JAR=//p' \
             diagnostics/resolved-libraries.txt \
             | tail -n 1)
 
-          cat > diagnostics/patch-src/EnumMapper.java <<'EOF'
-          package com.android.tools.build.bundletool.model.utils;
+          test -s "$PATCH"
+          test -s "$BUNDLETOOL_JAR"
 
-          import com.google.common.collect.ImmutableBiMap;
-          import com.google.common.collect.ImmutableSet;
-          import com.google.common.collect.ImmutableSortedMap;
-          import com.google.common.collect.Ordering;
+          mkdir -p diagnostics/patched-bundletool
+          mkdir -p diagnostics/patched-bundletool/work
 
-          import java.util.EnumSet;
-          import java.util.function.Predicate;
+          OUTPUT="$PWD/diagnostics/patched-bundletool/bundletool-patched-1.18.2.jar"
+          WORK="$PWD/diagnostics/patched-bundletool/work"
 
-          public final class EnumMapper {
+          CLASS="com/android/tools/build/bundletool/model/utils/EnumMapper.class"
 
-              private EnumMapper() {
-              }
+          echo "=== Check patch ==="
 
-              public static <E1 extends Enum<E1>, E2 extends Enum<E2>>
-                      ImmutableBiMap<E1, E2> mapByName(
-                              Class<E1> first,
-                              Class<E2> second) {
+          unzip -t "$PATCH"
 
-                  return mapByName(
-                          first,
-                          second,
-                          ImmutableSet.of()
-                  );
-              }
+          unzip -Z -1 "$PATCH" \
+            | grep -Fx "$CLASS"
 
-              public static <E1 extends Enum<E1>, E2 extends Enum<E2>>
-                      ImmutableBiMap<E1, E2> mapByName(
-                              Class<E1> first,
-                              Class<E2> second,
-                              ImmutableSet<E1> excluded) {
+          echo "=== Check original ==="
 
-                  ImmutableSortedMap<String, E1> left =
-                          enumValuesByName(first, excluded);
+          unzip -t "$BUNDLETOOL_JAR"
 
-                  ImmutableSortedMap<String, E2> right =
-                          enumValuesByName(
-                                  second,
-                                  ImmutableSet.of()
-                          );
+          unzip -Z -1 "$BUNDLETOOL_JAR" \
+            | grep -Fx "$CLASS"
 
-                  if (!left.keySet().equals(right.keySet())) {
-                      throw new IllegalArgumentException(
-                              "Enum values differ: "
-                                      + left.keySet()
-                                      + " vs "
-                                      + right.keySet()
-                      );
-                  }
+          echo "=== Extract original bundletool ==="
 
-                  ImmutableBiMap.Builder<E1, E2> builder =
-                          ImmutableBiMap.builder();
+          (
+            cd "$WORK"
+            jar xf "$BUNDLETOOL_JAR"
+          )
 
-                  for (String name : left.keySet()) {
-                      builder.put(
-                              left.get(name),
-                              right.get(name)
-                      );
-                  }
+          echo "=== Replace EnumMapper ==="
 
-                  return builder.build();
-              }
+          (
+            cd "$WORK"
+            jar xf "$OLDPWD/$PATCH"
+          )
 
-              private static <E extends Enum<E>>
-                      ImmutableSortedMap<String, E> enumValuesByName(
-                              Class<E> enumClass,
-                              ImmutableSet<E> excluded) {
+          echo "=== Remove stale signatures ==="
 
-                  Predicate<E> included =
-                          value -> !excluded.contains(value);
+          find "$WORK/META-INF" -maxdepth 1 -type f \
+            \( -iname '*.SF' \
+            -o -iname '*.RSA' \
+            -o -iname '*.DSA' \
+            -o -iname '*.EC' \) \
+            -delete
 
-                  return EnumSet.allOf(enumClass)
-                          .stream()
-                          .filter(included)
-                          .sorted()
-                          .collect(
-                                  ImmutableSortedMap.toImmutableSortedMap(
-                                          Ordering.natural(),
-                                          Enum::name,
-                                          value -> value
-                                  )
-                          );
-              }
-          }
-          EOF
+          echo "=== Create patched bundletool ==="
 
-          echo "=== Compile compatibility candidate ==="
+          (
+            cd "$WORK"
+            jar cf "$OUTPUT" .
+          )
 
-          javac --release 8 \
-            -cp "$GUARDED_JAR:$BUNDLETOOL_JAR" \
-            -d diagnostics/patch-classes \
-            diagnostics/patch-src/EnumMapper.java \
-            2>&1 | tee diagnostics/patch-compile.txt
+          echo "=== Verify patched bundletool ==="
+
+          unzip -t "$OUTPUT" \
+            | tail -n 2
+
+          ORIGINAL_CLASS_SHA=$(
+            unzip -p "$BUNDLETOOL_JAR" "$CLASS" \
+              | sha256sum | cut -d ' ' -f 1
+          )
+
+          PATCH_CLASS_SHA=$(
+            unzip -p "$PATCH" "$CLASS" \
+              | sha256sum | cut -d ' ' -f 1
+          )
+
+          OUTPUT_CLASS_SHA=$(
+            unzip -p "$OUTPUT" "$CLASS" \
+              | sha256sum | cut -d ' ' -f 1
+          )
+
+          {
+            echo "Original class: $ORIGINAL_CLASS_SHA"
+            echo "Patch class:    $PATCH_CLASS_SHA"
+            echo "Output class:   $OUTPUT_CLASS_SHA"
+          } | tee diagnostics/patched-bundletool/class-checksums.txt
+
+          test "$PATCH_CLASS_SHA" = "$OUTPUT_CLASS_SHA"
+
+          if [ "$ORIGINAL_CLASS_SHA" = "$OUTPUT_CLASS_SHA" ]; then
+            echo "ERROR: EnumMapper was not changed"
+            exit 1
+          fi
 
           echo "=== Inspect patched bytecode ==="
 
-          javap -classpath diagnostics/patch-classes \
+          javap -classpath "$OUTPUT" \
             -c -p \
             com.android.tools.build.bundletool.model.utils.EnumMapper \
-            | tee diagnostics/patched-enummapper-bytecode.txt
+            > diagnostics/patched-bundletool/patched-enummapper-bytecode.txt
 
-          echo "=== Package patch candidate ==="
+          if grep -q 'com/google/common/base/Predicates.not' \
+              diagnostics/patched-bundletool/patched-enummapper-bytecode.txt; then
+            echo "ERROR: Old Predicates.not call remains"
+            exit 1
+          fi
 
-          jar --create \
-            --file diagnostics/patch-output/enummapper-candidate.jar \
-            -C diagnostics/patch-classes .
+          echo "=== Final checksum ==="
 
-          echo "=== Verify patch JAR ==="
+          sha256sum "$OUTPUT" \
+            | tee diagnostics/patched-bundletool/SHA256SUMS.txt
 
-          jar tf \
-            diagnostics/patch-output/enummapper-candidate.jar \
-            | tee diagnostics/patch-jar-contents.txt
+          echo "Patched bundletool created successfully."
 
-          sha256sum \
-            diagnostics/patch-output/enummapper-candidate.jar \
-            | tee diagnostics/patch-sha256.txt
-
-          echo "Patch candidate compiled successfully."
-          echo "It has NOT been integrated into the Android APK."
+          rm -rf "$WORK"
 
       - name: Diagnose APK DEX
         shell: bash
@@ -332,11 +305,9 @@ jobs:
           test -s "$JAR"
 
           mkdir -p android-api-export
-
           cp "$JAR" android-api-export/android.jar
 
           cd android-api-export
-
           sha256sum android.jar > SHA256SUMS.txt
 
           echo "Android API 35 prepared."
@@ -367,11 +338,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Upload EnumMapper patch candidate
-        if: always()
+      - name: Upload patched bundletool
         uses: actions/upload-artifact@v4
         with:
-          name: CodeBox-5-EnumMapper-Patch
-          path: diagnostics/patch-output/
-          if-no-files-found: warn
+          name: CodeBox-5-Patched-Bundletool
+          path: diagnostics/patched-bundletool/
+          if-no-files-found: error
           retention-days: 30

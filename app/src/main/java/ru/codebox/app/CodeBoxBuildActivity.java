@@ -33,10 +33,13 @@ import java.util.Locale;
  *
  * Local APK and AAB build screen.
  *
- * APK: AAPT2 -> ECJ -> D8 -> APK -> APK signer.
+ * APK:
+ * AAPT2 -> ECJ -> D8 -> APK -> APK signer.
  *
- * AAB: AAPT2 -> ECJ -> D8 -> base module ->
- * bundletool -> CMS/JAR signer -> verification.
+ * AAB:
+ * AAPT2 -> ECJ -> D8 -> base module ->
+ * bundletool -> CMS/JAR signer ->
+ * signature verification -> AAB validation.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
@@ -71,18 +74,14 @@ public final class CodeBoxBuildActivity extends Activity {
                         "[A-Za-z][A-Za-z0-9_]{0,49}"
                 )) {
 
-            fatal(
-                    "Не передано корректное имя проекта"
-            );
+            fatal("Не передано корректное имя проекта");
             return;
         }
 
         try {
             manager = new CodeBoxBuildManager(this);
         } catch (IOException e) {
-            fatal(
-                    "Невозможно создать журнал: " + e
-            );
+            fatal("Невозможно создать журнал: " + e);
             return;
         }
 
@@ -91,7 +90,6 @@ public final class CodeBoxBuildActivity extends Activity {
     }
 
     private void fatal(String message) {
-
         new AlertDialog.Builder(this)
                 .setTitle("Ошибка")
                 .setMessage(message)
@@ -121,16 +119,10 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         root.setBackgroundColor(background);
-
         setContentView(root);
 
         root.addView(
-                label(
-                        "Сборка проекта",
-                        23,
-                        white,
-                        true
-                )
+                label("Сборка проекта", 23, white, true)
         );
 
         TextView subtitle = label(
@@ -146,10 +138,7 @@ public final class CodeBoxBuildActivity extends Activity {
         subtitleParams.topMargin = dp(5);
         subtitleParams.bottomMargin = dp(13);
 
-        root.addView(
-                subtitle,
-                subtitleParams
-        );
+        root.addView(subtitle, subtitleParams);
 
         statusView = label(
                 "Ожидание",
@@ -165,24 +154,16 @@ public final class CodeBoxBuildActivity extends Activity {
                 dp(10)
         );
 
-        statusView.setBackground(
-                shape(panel, 12)
-        );
-
+        statusView.setBackground(shape(panel, 12));
         root.addView(statusView);
 
-        LinearLayout builds =
-                new LinearLayout(this);
+        LinearLayout builds = new LinearLayout(this);
 
         LinearLayout.LayoutParams buildsParams =
                 new LinearLayout.LayoutParams(-1, -2);
 
         buildsParams.topMargin = dp(10);
-
-        root.addView(
-                builds,
-                buildsParams
-        );
+        root.addView(builds, buildsParams);
 
         addWeightedButton(
                 builds,
@@ -210,24 +191,15 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams jarParams =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        dp(44)
-                );
+                new LinearLayout.LayoutParams(-1, dp(44));
 
         jarParams.topMargin = dp(10);
 
-        root.addView(
-                androidJarButton,
-                jarParams
-        );
+        root.addView(androidJarButton, jarParams);
 
         androidJarButton.setOnClickListener(v -> {
-
             if (installing) {
-                toast(
-                        "Дождитесь завершения текущей операции"
-                );
+                toast("Дождитесь завершения текущей операции");
             } else {
                 requestAndroidJar();
             }
@@ -239,24 +211,14 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams installParams =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        dp(44)
-                );
+                new LinearLayout.LayoutParams(-1, dp(44));
 
         installParams.topMargin = dp(8);
-
-        root.addView(
-                install,
-                installParams
-        );
+        root.addView(install, installParams);
 
         install.setOnClickListener(v -> {
-
             if (installing) {
-                toast(
-                        "Дождитесь завершения текущей операции"
-                );
+                toast("Дождитесь завершения текущей операции");
             } else {
                 requestInstall();
             }
@@ -270,31 +232,20 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams headingParams =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        -2
-                );
+                new LinearLayout.LayoutParams(-1, -2);
 
         headingParams.topMargin = dp(15);
         headingParams.bottomMargin = dp(8);
 
-        root.addView(
-                heading,
-                headingParams
-        );
+        root.addView(heading, headingParams);
 
         ScrollView scroll = new ScrollView(this);
-
         scroll.setFillViewport(true);
         scroll.setBackground(shape(panel, 12));
 
         root.addView(
                 scroll,
-                new LinearLayout.LayoutParams(
-                        -1,
-                        0,
-                        1
-                )
+                new LinearLayout.LayoutParams(-1, 0, 1)
         );
 
         reportView = label(
@@ -304,10 +255,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 false
         );
 
-        reportView.setTypeface(
-                Typeface.MONOSPACE
-        );
-
+        reportView.setTypeface(Typeface.MONOSPACE);
         reportView.setTextIsSelectable(true);
 
         reportView.setPadding(
@@ -325,37 +273,22 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         LinearLayout.LayoutParams exportParams =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        dp(44)
-                );
+                new LinearLayout.LayoutParams(-1, dp(44));
 
         exportParams.topMargin = dp(10);
-
-        root.addView(
-                export,
-                exportParams
-        );
+        root.addView(export, exportParams);
 
         export.setOnClickListener(
                 v -> requestArtifactExport()
         );
 
-        LinearLayout tools =
-                new LinearLayout(this);
+        LinearLayout tools = new LinearLayout(this);
 
         LinearLayout.LayoutParams toolsParams =
-                new LinearLayout.LayoutParams(
-                        -1,
-                        -2
-                );
+                new LinearLayout.LayoutParams(-1, -2);
 
         toolsParams.topMargin = dp(10);
-
-        root.addView(
-                tools,
-                toolsParams
-        );
+        root.addView(tools, toolsParams);
 
         addWeightedButton(
                 tools,
@@ -382,17 +315,10 @@ public final class CodeBoxBuildActivity extends Activity {
             boolean first
     ) {
 
-        TextView button = actionButton(
-                name,
-                color
-        );
+        TextView button = actionButton(name, color);
 
         LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        0,
-                        dp(45),
-                        1
-                );
+                new LinearLayout.LayoutParams(0, dp(45), 1);
 
         if (first) {
             params.rightMargin = dp(5);
@@ -400,18 +326,11 @@ public final class CodeBoxBuildActivity extends Activity {
             params.leftMargin = dp(5);
         }
 
-        row.addView(
-                button,
-                params
-        );
+        row.addView(button, params);
 
         button.setOnClickListener(v -> {
-
             if (installing) {
-
-                toast(
-                        "Дождитесь завершения текущей операции"
-                );
+                toast("Дождитесь завершения текущей операции");
                 return;
             }
 
@@ -424,10 +343,7 @@ public final class CodeBoxBuildActivity extends Activity {
     ) {
 
         if (installing) {
-
-            toast(
-                    "Дождитесь завершения текущей операции"
-            );
+            toast("Дождитесь завершения текущей операции");
             return;
         }
 
@@ -454,8 +370,9 @@ public final class CodeBoxBuildActivity extends Activity {
                             + "bundletool, затем подпишем "
                             + "AAB тестовым RSA-ключом "
                             + "через CMS/PKCS#7.\n\n"
-                            + "Подпись будет проверена "
-                            + "перед завершением сборки.\n\n"
+                            + "Проверим JAR-подпись и "
+                            + "структуру подписанного AAB "
+                            + "через bundletool.\n\n"
                             + "Это тестовый ключ, "
                             + "не предназначенный "
                             + "для публикации.";
@@ -470,14 +387,10 @@ public final class CodeBoxBuildActivity extends Activity {
 
         new AlertDialog.Builder(this)
                 .setTitle(
-                        "Локальная сборка "
-                                + format.name()
+                        "Локальная сборка " + format.name()
                 )
                 .setMessage(message)
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .setPositiveButton(
                         "Запустить",
                         (d, w) -> runDiagnostic(format)
@@ -490,10 +403,7 @@ public final class CodeBoxBuildActivity extends Activity {
     ) {
 
         if (installing) {
-
-            toast(
-                    "Дождитесь завершения текущей операции"
-            );
+            toast("Дождитесь завершения текущей операции");
             return;
         }
 
@@ -502,9 +412,7 @@ public final class CodeBoxBuildActivity extends Activity {
         artifactPendingExport = null;
 
         statusView.setText(
-                "Статус: сборка "
-                        + format.name()
-                        + "..."
+                "Статус: сборка " + format.name() + "..."
         );
 
         reportView.setText(
@@ -517,14 +425,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
             try {
 
-                manager.start(
-                        projectName,
-                        format
-                );
-
-                manager.setStage(
-                        "Проверка проекта"
-                );
+                manager.start(projectName, format);
+                manager.setStage("Проверка проекта");
 
                 File projectsRoot = new File(
                         getFilesDir(),
@@ -553,13 +455,10 @@ public final class CodeBoxBuildActivity extends Activity {
                 );
 
                 manager.info(
-                        "Формат результата: "
-                                + format.name()
+                        "Формат результата: " + format.name()
                 );
 
-                manager.setStage(
-                        "Проверка инструментов"
-                );
+                manager.setStage("Проверка инструментов");
 
                 CodeBoxToolchainInspector.Result tools =
                         CodeBoxToolchainInspector.inspect(
@@ -570,20 +469,12 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 manager.info(
                         "Готовность APK по старому инспектору: "
-                                + (
-                                tools.readyForApk
-                                        ? "да"
-                                        : "нет"
-                        )
+                                + (tools.readyForApk ? "да" : "нет")
                 );
 
                 manager.info(
                         "Готовность AAB по старому инспектору: "
-                                + (
-                                tools.readyForAab
-                                        ? "да"
-                                        : "нет"
-                        )
+                                + (tools.readyForAab ? "да" : "нет")
                 );
 
                 manager.info(
@@ -608,16 +499,10 @@ public final class CodeBoxBuildActivity extends Activity {
                     manager.info(aapt2.report);
 
                     if (!aapt2.found) {
-
-                        manager.warning(
-                                "AAPT2 не найден."
-                        );
-
+                        manager.warning("AAPT2 не найден.");
                     } else {
 
-                        manager.info(
-                                "AAPT2_FOUND: YES"
-                        );
+                        manager.info("AAPT2_FOUND: YES");
 
                         manager.info(
                                 "AAPT2_ELF_VALID: "
@@ -636,11 +521,8 @@ public final class CodeBoxBuildActivity extends Activity {
 
                         manager.info(
                                 "AAPT2_LAUNCH_TEST: "
-                                        + (
-                                        aapt2.launchSuccessful
-                                                ? "OK"
-                                                : "FAILED"
-                                )
+                                        + (aapt2.launchSuccessful
+                                        ? "OK" : "FAILED")
                         );
                     }
 
@@ -664,12 +546,11 @@ public final class CodeBoxBuildActivity extends Activity {
 
                     File manifestWork = new File(
                             getCacheDir(),
-                            (
-                                    format ==
-                                            CodeBoxBuildManager.OutputFormat.APK
-                                            ? "apk-manifest-"
-                                            : "aab-manifest-"
-                            ) + projectName
+                            (format ==
+                                    CodeBoxBuildManager.OutputFormat.APK
+                                    ? "apk-manifest-"
+                                    : "aab-manifest-")
+                                    + projectName
                     );
 
                     CodeBoxApkManifestPreparer.Result
@@ -679,9 +560,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                     manifestWork
                             );
 
-                    manager.info(
-                            manifestResult.report
-                    );
+                    manager.info(manifestResult.report);
 
                     if (manifestResult.manifestFile == null
                             || !manifestResult.manifestFile.isFile()
@@ -700,9 +579,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                     + manifestResult.applicationId
                     );
 
-                    manager.info(
-                            "MANIFEST_PREPARED: OK"
-                    );
+                    manager.info("MANIFEST_PREPARED: OK");
 
                 } catch (Exception e) {
 
@@ -737,9 +614,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                         projectName
                                 );
 
-                        manager.info(
-                                resources.report
-                        );
+                        manager.info(resources.report);
 
                         if (!resources.compiled
                                 || resources.resourceApk == null
@@ -752,8 +627,7 @@ public final class CodeBoxBuildActivity extends Activity {
                             return;
                         }
 
-                        linkedResources =
-                                resources.resourceApk;
+                        linkedResources = resources.resourceApk;
 
                         manager.info(
                                 "RESOURCE_APK_CREATED: OK"
@@ -769,9 +643,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                         projectName
                                 );
 
-                        manager.info(
-                                resources.report
-                        );
+                        manager.info(resources.report);
 
                         if (!resources.compiled
                                 || resources.resourceApk == null
@@ -785,8 +657,7 @@ public final class CodeBoxBuildActivity extends Activity {
                             return;
                         }
 
-                        linkedResources =
-                                resources.resourceApk;
+                        linkedResources = resources.resourceApk;
 
                         manager.info(
                                 "PROTO_RESOURCE_APK_CREATED: OK"
@@ -815,9 +686,7 @@ public final class CodeBoxBuildActivity extends Activity {
                     return;
                 }
 
-                manager.setStage(
-                        "Подготовка Java"
-                );
+                manager.setStage("Подготовка Java");
 
                 CodeBoxJavaCompiler.Result preparation =
                         CodeBoxJavaCompiler.inspect(
@@ -825,13 +694,9 @@ public final class CodeBoxBuildActivity extends Activity {
                                 project
                         );
 
-                manager.info(
-                        preparation.report
-                );
+                manager.info(preparation.report);
 
-                manager.setStage(
-                        "Компиляция Java (ECJ)"
-                );
+                manager.setStage("Компиляция Java (ECJ)");
 
                 CodeBoxEcjCompiler.Result compiled =
                         CodeBoxEcjCompiler.compile(
@@ -839,9 +704,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 project
                         );
 
-                manager.info(
-                        compiled.report
-                );
+                manager.info(compiled.report);
 
                 if (!compiled.compiled) {
 
@@ -881,7 +744,6 @@ public final class CodeBoxBuildActivity extends Activity {
             } finally {
 
                 runOnUiThread(() -> {
-
                     installing = false;
                     refreshReport();
                 });
@@ -896,9 +758,7 @@ public final class CodeBoxBuildActivity extends Activity {
             File linkedResources
     ) throws IOException {
 
-        manager.setStage(
-                "Проверка CLASS"
-        );
+        manager.setStage("Проверка CLASS");
 
         if (classesDirectory == null
                 || !classesDirectory.isDirectory()) {
@@ -909,27 +769,18 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        File root =
-                classesDirectory.getCanonicalFile();
+        File root = classesDirectory.getCanonicalFile();
 
         manager.info(
-                "Каталог CLASS: "
-                        + root.getAbsolutePath()
+                "Каталог CLASS: " + root.getAbsolutePath()
         );
 
-        ClassScan scan =
-                new ClassScan();
+        ClassScan scan = new ClassScan();
 
-        scanClassFiles(
-                root,
-                root,
-                scan,
-                0
-        );
+        scanClassFiles(root, root, scan, 0);
 
         manager.info(
-                "Найдено CLASS файлов: "
-                        + scan.count
+                "Найдено CLASS файлов: " + scan.count
         );
 
         if (scan.count == 0) {
@@ -947,9 +798,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         if (scan.mainActivity != null) {
 
-            manager.info(
-                    "MainActivity.class: OK"
-            );
+            manager.info("MainActivity.class: OK");
 
             manager.info(
                     "Путь: "
@@ -975,9 +824,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Проверка CLASS завершена."
         );
 
-        manager.setStage(
-                "Проверка D8"
-        );
+        manager.setStage("Проверка D8");
 
         try {
 
@@ -997,9 +844,7 @@ public final class CodeBoxBuildActivity extends Activity {
             );
         }
 
-        manager.setStage(
-                "Компиляция DEX (D8)"
-        );
+        manager.setStage("Компиляция DEX (D8)");
 
         CodeBoxD8Compiler.Result dex =
                 CodeBoxD8Compiler.compile(
@@ -1008,9 +853,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                dex.report
-        );
+        manager.info(dex.report);
 
         if (!dex.compiled) {
 
@@ -1033,9 +876,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "classes.dex: OK"
-        );
+        manager.info("classes.dex: OK");
 
         manager.info(
                 "Путь: "
@@ -1067,18 +908,13 @@ public final class CodeBoxBuildActivity extends Activity {
 
     /**
      * Existing APK build pipeline.
-     *
-     * IOException is propagated to the
-     * outer build error handler.
      */
     private void buildSignedApk(
             File linkedResources,
             File dexFile
     ) throws IOException {
 
-        manager.setStage(
-                "Упаковка APK"
-        );
+        manager.setStage("Упаковка APK");
 
         CodeBoxApkPackager.Result packaged =
                 CodeBoxApkPackager.packageApk(
@@ -1088,9 +924,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                packaged.report
-        );
+        manager.info(packaged.report);
 
         if (!packaged.packaged
                 || packaged.apkFile == null
@@ -1104,9 +938,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "UNSIGNED_APK_CREATED: OK"
-        );
+        manager.info("UNSIGNED_APK_CREATED: OK");
 
         manager.info(
                 "Путь: "
@@ -1119,9 +951,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         + " байт"
         );
 
-        manager.setStage(
-                "Подпись APK"
-        );
+        manager.setStage("Подпись APK");
 
         CodeBoxApkSigner.Result signed =
                 CodeBoxApkSigner.sign(
@@ -1130,9 +960,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                signed.report
-        );
+        manager.info(signed.report);
 
         if (!signed.signed
                 || signed.signedApk == null
@@ -1146,9 +974,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "SIGNED_APK_CREATED: OK"
-        );
+        manager.info("SIGNED_APK_CREATED: OK");
 
         manager.info(
                 "Путь: "
@@ -1165,16 +991,12 @@ public final class CodeBoxBuildActivity extends Activity {
                 "APK подписан и проверен apksig."
         );
 
-        manager.succeed(
-                signed.signedApk
-        );
+        manager.succeed(signed.signedApk);
     }
 
     /**
-     * AAB pipeline with CMS/JAR signing.
-     *
-     * IOException is propagated to the
-     * outer build error handler.
+     * AAB pipeline with CMS/JAR signing
+     * and bundletool structure validation.
      */
     private void buildSignedAab(
             File linkedResources,
@@ -1193,9 +1015,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                base.report
-        );
+        manager.info(base.report);
 
         if (!base.prepared
                 || base.moduleZip == null
@@ -1208,9 +1028,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "BASE_MODULE_PREPARED: OK"
-        );
+        manager.info("BASE_MODULE_PREPARED: OK");
 
         manager.setStage(
                 "Формирование AAB (bundletool)"
@@ -1223,9 +1041,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                bundle.report
-        );
+        manager.info(bundle.report);
 
         if (!bundle.built
                 || bundle.aabFile == null
@@ -1239,9 +1055,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "UNSIGNED_AAB_CREATED: OK"
-        );
+        manager.info("UNSIGNED_AAB_CREATED: OK");
 
         manager.info(
                 "Неподписанный AAB: "
@@ -1254,9 +1068,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         + " байт"
         );
 
-        // -------------------------------------
         // AAB signing.
-        // -------------------------------------
 
         manager.setStage(
                 "Подпись AAB (CMS/PKCS#7)"
@@ -1281,9 +1093,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         projectName
                 );
 
-        manager.info(
-                signed.report
-        );
+        manager.info(signed.report);
 
         if (!signed.signed
                 || signed.aabFile == null
@@ -1297,13 +1107,8 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        manager.info(
-                "SIGNED_AAB_CREATED: OK"
-        );
-
-        manager.info(
-                "SIGNED_AAB_VERIFIED: OK"
-        );
+        manager.info("SIGNED_AAB_CREATED: OK");
+        manager.info("SIGNED_AAB_VERIFIED: OK");
 
         manager.info(
                 "Подписанный AAB: "
@@ -1316,6 +1121,40 @@ public final class CodeBoxBuildActivity extends Activity {
                         + " байт"
         );
 
+        // -------------------------------------
+        // NEW: Validate signed AAB with bundletool.
+        // -------------------------------------
+
+        manager.setStage(
+                "Проверка подписанного AAB (bundletool)"
+        );
+
+        manager.info(
+                "Запуск CodeBoxAabValidator."
+        );
+
+        CodeBoxAabValidator.Result validation =
+                CodeBoxAabValidator.validate(
+                        getApplicationContext(),
+                        signed.aabFile
+                );
+
+        manager.info(validation.report);
+
+        if (!validation.valid) {
+
+            manager.fail(
+                    "Подписанный AAB не прошёл "
+                            + "проверку структуры bundletool. "
+                            + "См. журнал валидатора выше."
+            );
+            return;
+        }
+
+        manager.info(
+                "SIGNED_AAB_STRUCTURE_VALID: OK"
+        );
+
         manager.warning(
                 "AAB подписан тестовым ключом. "
                         + "Для публикации нужен постоянный "
@@ -1323,13 +1162,10 @@ public final class CodeBoxBuildActivity extends Activity {
                         + "проверка совместимости."
         );
 
-        manager.succeed(
-                signed.aabFile
-        );
+        manager.succeed(signed.aabFile);
     }
 
     private static final class ClassScan {
-
         int count;
         File mainActivity;
     }
@@ -1348,8 +1184,7 @@ public final class CodeBoxBuildActivity extends Activity {
             );
         }
 
-        File[] children =
-                directory.listFiles();
+        File[] children = directory.listFiles();
 
         if (children == null) {
 
@@ -1361,14 +1196,10 @@ public final class CodeBoxBuildActivity extends Activity {
 
         for (File child : children) {
 
-            File canonical =
-                    child.getCanonicalFile();
+            File canonical = child.getCanonicalFile();
 
-            String rootPath =
-                    root.getCanonicalPath();
-
-            String childPath =
-                    canonical.getCanonicalPath();
+            String rootPath = root.getCanonicalPath();
+            String childPath = canonical.getCanonicalPath();
 
             if (!childPath.startsWith(
                     rootPath + File.separator
@@ -1405,8 +1236,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         canonical.getName()
                 )) {
 
-                    result.mainActivity =
-                            canonical;
+                    result.mainActivity = canonical;
                 }
             }
         }
@@ -1415,10 +1245,7 @@ public final class CodeBoxBuildActivity extends Activity {
     private void requestArtifactExport() {
 
         if (installing) {
-
-            toast(
-                    "Дождитесь завершения текущей операции"
-            );
+            toast("Дождитесь завершения текущей операции");
             return;
         }
 
@@ -1431,8 +1258,7 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        File artifact =
-                manager.getOutputFile();
+        File artifact = manager.getOutputFile();
 
         if (artifact == null
                 || !artifact.isFile()
@@ -1446,20 +1272,13 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         String lowerName =
-                artifact.getName()
-                        .toLowerCase(Locale.ROOT);
+                artifact.getName().toLowerCase(Locale.ROOT);
 
-        boolean apk =
-                lowerName.endsWith(".apk");
-
-        boolean aab =
-                lowerName.endsWith(".aab");
+        boolean apk = lowerName.endsWith(".apk");
+        boolean aab = lowerName.endsWith(".aab");
 
         if (!apk && !aab) {
-
-            toast(
-                    "Неизвестный формат результата"
-            );
+            toast("Неизвестный формат результата");
             return;
         }
 
@@ -1469,9 +1288,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 Intent.ACTION_CREATE_DOCUMENT
         );
 
-        intent.addCategory(
-                Intent.CATEGORY_OPENABLE
-        );
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
 
         intent.setType(
                 apk
@@ -1502,13 +1319,9 @@ public final class CodeBoxBuildActivity extends Activity {
         }
     }
 
-    private void exportArtifact(
-            Uri destination
-    ) {
+    private void exportArtifact(Uri destination) {
 
-        final File source =
-                artifactPendingExport;
-
+        final File source = artifactPendingExport;
         artifactPendingExport = null;
 
         if (source == null
@@ -1554,20 +1367,12 @@ public final class CodeBoxBuildActivity extends Activity {
                     );
                 }
 
-                byte[] buffer =
-                        new byte[32768];
-
+                byte[] buffer = new byte[32768];
                 int count;
 
-                while ((count = input.read(buffer))
-                        != -1) {
+                while ((count = input.read(buffer)) != -1) {
 
-                    output.write(
-                            buffer,
-                            0,
-                            count
-                    );
-
+                    output.write(buffer, 0, count);
                     copied += count;
                 }
 
@@ -1637,23 +1442,15 @@ public final class CodeBoxBuildActivity extends Activity {
                                             : "APK сохранён"
                             )
                             .setMessage(message)
-                            .setPositiveButton(
-                                    "OK",
-                                    null
-                            )
+                            .setPositiveButton("OK", null)
                             .show();
 
                 } else {
 
                     new AlertDialog.Builder(this)
-                            .setTitle(
-                                    "Ошибка сохранения"
-                            )
+                            .setTitle("Ошибка сохранения")
                             .setMessage(failure)
-                            .setPositiveButton(
-                                    "OK",
-                                    null
-                            )
+                            .setPositiveButton("OK", null)
                             .show();
                 }
             });
@@ -1668,9 +1465,7 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Установка Android API"
-                )
+                .setTitle("Установка Android API")
                 .setMessage(
                         "Выберите настоящий android.jar "
                                 + "из Android SDK, например "
@@ -1681,10 +1476,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 + "\n\nИспользуйте только "
                                 + "доверенный SDK."
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .setPositiveButton(
                         "Выбрать android.jar",
                         (d, w) -> {
@@ -1727,9 +1519,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 .show();
     }
 
-    private void installAndroidJar(
-            Uri uri
-    ) {
+    private void installAndroidJar(Uri uri) {
 
         if (installing) {
             return;
@@ -1785,10 +1575,8 @@ public final class CodeBoxBuildActivity extends Activity {
             final String report = result;
 
             runOnUiThread(() -> {
-
                 installing = false;
                 installationReport = report;
-
                 refreshReport();
             });
 
@@ -1802,9 +1590,7 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Установка инструментов"
-                )
+                .setTitle("Установка инструментов")
                 .setMessage(
                         "Нужен заранее проверенный ZIP "
                                 + "с шестью файлами в корне:"
@@ -1818,10 +1604,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 + "не означает совместимость "
                                 + "с Android."
                 )
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .setPositiveButton(
                         "Выбрать ZIP",
                         (d, w) -> {
@@ -1834,9 +1617,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                     Intent.CATEGORY_OPENABLE
                             );
 
-                            intent.setType(
-                                    "application/zip"
-                            );
+                            intent.setType("application/zip");
 
                             intent.putExtra(
                                     Intent.EXTRA_MIME_TYPES,
@@ -1878,18 +1659,14 @@ public final class CodeBoxBuildActivity extends Activity {
                 data
         );
 
-        if (requestCode ==
-                SAVE_BUILT_ARTIFACT) {
+        if (requestCode == SAVE_BUILT_ARTIFACT) {
 
             if (resultCode == RESULT_OK
                     && data != null
                     && data.getData() != null) {
 
                 if (!installing) {
-
-                    exportArtifact(
-                            data.getData()
-                    );
+                    exportArtifact(data.getData());
                 }
 
             } else {
@@ -1915,24 +1692,19 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        final Uri uri =
-                data.getData();
+        final Uri uri = data.getData();
 
-        if (requestCode ==
-                PICK_ANDROID_JAR) {
+        if (requestCode == PICK_ANDROID_JAR) {
 
             installAndroidJar(uri);
             return;
         }
 
-        if (requestCode !=
-                PICK_TOOLCHAIN_ZIP) {
-
+        if (requestCode != PICK_TOOLCHAIN_ZIP) {
             return;
         }
 
-        EditText hash =
-                new EditText(this);
+        EditText hash = new EditText(this);
 
         hash.setSingleLine(true);
 
@@ -1941,9 +1713,7 @@ public final class CodeBoxBuildActivity extends Activity {
                         | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         );
 
-        hash.setHint(
-                "64 символа SHA-256"
-        );
+        hash.setHint("64 символа SHA-256");
 
         hash.setPadding(
                 dp(16),
@@ -1953,9 +1723,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         new AlertDialog.Builder(this)
-                .setTitle(
-                        "Доверенный SHA-256"
-                )
+                .setTitle("Доверенный SHA-256")
                 .setMessage(
                         "Вставьте контрольную сумму "
                                 + "из независимого доверенного "
@@ -1964,10 +1732,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 + "из того же непроверенного архива."
                 )
                 .setView(hash)
-                .setNegativeButton(
-                        "Отмена",
-                        null
-                )
+                .setNegativeButton("Отмена", null)
                 .setPositiveButton(
                         "Установить",
                         (d, w) -> {
@@ -1988,10 +1753,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 return;
                             }
 
-                            installZip(
-                                    uri,
-                                    expected
-                            );
+                            installZip(uri, expected);
                         }
                 )
                 .show();
@@ -2069,10 +1831,8 @@ public final class CodeBoxBuildActivity extends Activity {
             final String report = result;
 
             runOnUiThread(() -> {
-
                 installing = false;
                 installationReport = report;
-
                 refreshReport();
             });
 
@@ -2102,10 +1862,7 @@ public final class CodeBoxBuildActivity extends Activity {
                             + "(совместимость не проверена)"
             );
 
-            reportView.setText(
-                    installationReport
-            );
-
+            reportView.setText(installationReport);
             return;
         }
 
@@ -2122,8 +1879,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         reportView.setText(
-                state ==
-                        CodeBoxBuildManager.State.IDLE
+                state == CodeBoxBuildManager.State.IDLE
                         ? "Выберите APK или AAB для запуска "
                         + "локальной сборки. "
                         + "Если Android API отсутствует, "
@@ -2151,15 +1907,11 @@ public final class CodeBoxBuildActivity extends Activity {
     private void saveLog() {
 
         if (installing) {
-
-            toast(
-                    "Дождитесь завершения текущей операции"
-            );
+            toast("Дождитесь завершения текущей операции");
             return;
         }
 
-        String report =
-                currentReport();
+        String report = currentReport();
 
         if (report == null) {
 
@@ -2200,9 +1952,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 file = new File(
                         dir,
-                        "toolchain_"
-                                + stamp
-                                + ".txt"
+                        "toolchain_" + stamp + ".txt"
                 );
 
                 try (
@@ -2221,9 +1971,7 @@ public final class CodeBoxBuildActivity extends Activity {
             }
 
             new AlertDialog.Builder(this)
-                    .setTitle(
-                            "Журнал сохранён"
-                    )
+                    .setTitle("Журнал сохранён")
                     .setMessage(
                             "Внутренний файл приложения:"
                                     + "\n"
@@ -2231,25 +1979,15 @@ public final class CodeBoxBuildActivity extends Activity {
                                     + "\n\nЧтобы передать текст "
                                     + "журнала, нажмите «Поделиться»."
                     )
-                    .setPositiveButton(
-                            "OK",
-                            null
-                    )
+                    .setPositiveButton("OK", null)
                     .show();
 
         } catch (IOException e) {
 
             new AlertDialog.Builder(this)
-                    .setTitle(
-                            "Ошибка сохранения"
-                    )
-                    .setMessage(
-                            e.toString()
-                    )
-                    .setPositiveButton(
-                            "OK",
-                            null
-                    )
+                    .setTitle("Ошибка сохранения")
+                    .setMessage(e.toString())
+                    .setPositiveButton("OK", null)
                     .show();
         }
     }
@@ -2257,15 +1995,11 @@ public final class CodeBoxBuildActivity extends Activity {
     private void shareLog() {
 
         if (installing) {
-
-            toast(
-                    "Дождитесь завершения текущей операции"
-            );
+            toast("Дождитесь завершения текущей операции");
             return;
         }
 
-        String report =
-                currentReport();
+        String report = currentReport();
 
         if (report == null) {
 
@@ -2279,14 +2013,11 @@ public final class CodeBoxBuildActivity extends Activity {
                 Intent.ACTION_SEND
         );
 
-        send.setType(
-                "text/plain"
-        );
+        send.setType("text/plain");
 
         send.putExtra(
                 Intent.EXTRA_SUBJECT,
-                "CodeBox 5 — журнал "
-                        + projectName
+                "CodeBox 5 — журнал " + projectName
         );
 
         send.putExtra(
@@ -2319,8 +2050,7 @@ public final class CodeBoxBuildActivity extends Activity {
             boolean bold
     ) {
 
-        TextView view =
-                new TextView(this);
+        TextView view = new TextView(this);
 
         view.setText(value);
         view.setTextSize(size);
@@ -2349,10 +2079,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 true
         );
 
-        view.setGravity(
-                Gravity.CENTER
-        );
-
+        view.setGravity(Gravity.CENTER);
         view.setSingleLine(true);
 
         view.setEllipsize(

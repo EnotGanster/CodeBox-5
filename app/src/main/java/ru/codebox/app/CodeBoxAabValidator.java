@@ -10,8 +10,6 @@ import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
-import java.nio.file.Files;
-
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Set;
@@ -54,6 +52,9 @@ public final class CodeBoxAabValidator {
         }
     }
 
+    /**
+     * Validate an existing AAB.
+     */
     public static Result validate(
             Context context,
             File aabFile
@@ -67,6 +68,7 @@ public final class CodeBoxAabValidator {
         try {
 
             if (context == null) {
+
                 throw new IOException(
                         "Context отсутствует"
                 );
@@ -158,7 +160,9 @@ public final class CodeBoxAabValidator {
                                  zip.getInputStream(entry)) {
 
                         while (input.read(buffer) != -1) {
-                            // Read entry and check CRC.
+                            // Read the entire ZIP entry.
+                            // ZIP CRC is checked by the
+                            // underlying implementation.
                         }
                     }
 
@@ -199,20 +203,39 @@ public final class CodeBoxAabValidator {
 
             log.append("\n--- Bundletool validation ---\n");
 
-            AppBundle bundle = AppBundle.buildFromZip(
-                    aabFile.toPath()
-            );
+            /*
+             * bundletool 1.18.2 expects ZipFile,
+             * not java.nio.file.Path.
+             *
+             * Keep the ZIP open while bundletool
+             * reads and parses the App Bundle.
+             */
+            try (ZipFile bundleZip = new ZipFile(aabFile)) {
 
-            if (bundle == null) {
+                AppBundle bundle =
+                        AppBundle.buildFromZip(
+                                bundleZip
+                        );
 
-                throw new IOException(
-                        "Bundletool не прочитал AAB"
+                if (bundle == null) {
+
+                    throw new IOException(
+                            "Bundletool не прочитал AAB"
+                    );
+                }
+
+                log.append(
+                        "AppBundle.buildFromZip: OK\n"
                 );
             }
 
-            log.append("AppBundle.buildFromZip: OK\n");
+            log.append("\n--- Результат ---\n");
 
-            log.append("Результат: VALID\n");
+            log.append("Статус: VALID\n");
+
+            log.append(
+                    "Структура AAB проверена успешно\n"
+            );
 
             return new Result(
                     true,
@@ -224,20 +247,28 @@ public final class CodeBoxAabValidator {
 
             log.append("\n--- Ошибка ---\n");
 
-            log.append(error.getClass().getName())
-                    .append(": ")
+            log.append(
+                    error.getClass().getName()
+            );
+
+            log.append(": ")
                     .append(error.getMessage())
                     .append('\n');
 
-            StringWriter writer = new StringWriter();
-            PrintWriter printer = new PrintWriter(writer);
+            StringWriter writer =
+                    new StringWriter();
+
+            PrintWriter printer =
+                    new PrintWriter(writer);
 
             error.printStackTrace(printer);
             printer.flush();
 
             log.append(writer.toString());
 
-            log.append("\nРезультат: INVALID\n");
+            log.append("\n--- Результат ---\n");
+
+            log.append("Статус: INVALID\n");
 
             return new Result(
                     false,
@@ -247,6 +278,9 @@ public final class CodeBoxAabValidator {
         }
     }
 
+    /**
+     * Require a non-empty ZIP entry.
+     */
     private static void requireEntry(
             ZipFile zip,
             String name

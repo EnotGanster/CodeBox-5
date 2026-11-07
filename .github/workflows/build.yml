@@ -27,18 +27,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Diagnose Guava dependencies
+      - name: Diagnose dependencies
         shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p diagnostics
 
+          echo "=== Guava dependency insight ==="
+
           gradle --no-daemon \
             :app:dependencyInsight \
             --configuration debugRuntimeClasspath \
             --dependency com.google.guava:guava \
             | tee diagnostics/guava-dependency-insight.txt
+
+          echo "=== Runtime dependencies ==="
 
           gradle --no-daemon \
             :app:dependencies \
@@ -48,20 +52,20 @@ jobs:
       - name: Build Debug APK
         run: gradle --no-daemon assembleDebug
 
-      - name: Diagnose actual Guava JAR
+      - name: Diagnose Guava and bundletool bytecode
         shell: bash
         run: |
           set -euo pipefail
 
           mkdir -p diagnostics
 
-          echo "=== Create Gradle diagnostic task ==="
+          echo "=== Create Gradle inspection task ==="
 
-          cat > diagnostics/guava-init.gradle <<'EOF'
+          cat > diagnostics/inspect-libraries.gradle <<'EOF'
           allprojects {
               afterEvaluate { project ->
                   if (project.path == ':app') {
-                      project.tasks.register('printGuavaRuntimeJar') {
+                      project.tasks.register('inspectRuntimeLibraries') {
                           doLast {
                               def config =
                                   project.configurations.getByName(
@@ -83,6 +87,19 @@ jobs:
                                           artifact.file.absolutePath
                                       )
                                   }
+
+                                  if (id.group ==
+                                          'com.android.tools.build'
+                                          && id.name == 'bundletool') {
+                                      println(
+                                          'BUNDLETOOL_VERSION=' +
+                                          id.version
+                                      )
+                                      println(
+                                          'BUNDLETOOL_JAR=' +
+                                          artifact.file.absolutePath
+                                      )
+                                  }
                               }
                           }
                       }
@@ -91,30 +108,34 @@ jobs:
           }
           EOF
 
-          echo "=== Resolve actual runtime artifacts ==="
+          echo "=== Resolve runtime JARs ==="
 
           gradle --no-daemon \
-            --init-script diagnostics/guava-init.gradle \
-            :app:printGuavaRuntimeJar \
-            | tee diagnostics/guava-resolved-artifact.txt
+            --init-script diagnostics/inspect-libraries.gradle \
+            :app:inspectRuntimeLibraries \
+            | tee diagnostics/resolved-libraries.txt
 
           GUARDED_JAR=$(sed -n \
             's/^GUAVA_JAR=//p' \
-            diagnostics/guava-resolved-artifact.txt \
+            diagnostics/resolved-libraries.txt \
             | tail -n 1)
 
-          if [ -z "$GUARDED_JAR" ]; then
-            echo "ERROR: Gradle did not report Guava JAR"
+          BUNDLETOOL_JAR=$(sed -n \
+            's/^BUNDLETOOL_JAR=//p' \
+            diagnostics/resolved-libraries.txt \
+            | tail -n 1)
+
+          if [ -z "$GUARDED_JAR" ] || \
+             [ ! -s "$GUARDED_JAR" ]; then
+            echo "ERROR: Guava JAR not found"
             exit 1
           fi
 
-          if [ ! -s "$GUARDED_JAR" ]; then
-            echo "ERROR: Guava JAR missing or empty"
+          if [ -z "$BUNDLETOOL_JAR" ] || \
+             [ ! -s "$BUNDLETOOL_JAR" ]; then
+            echo "ERROR: bundletool JAR not found"
             exit 1
           fi
-
-          echo "=== Actual Guava JAR ==="
-          echo "$GUARDED_JAR"
 
           echo "=== Guava Predicate ==="
 
@@ -128,18 +149,31 @@ jobs:
             -p 'com.google.common.base.Predicates$NotPredicate' \
             | tee diagnostics/guava-not-predicate.txt
 
-          echo "=== Guava bytecode details ==="
+          echo "=== Bundletool EnumMapper bytecode ==="
 
-          javap -classpath "$GUARDED_JAR" \
-            -v com.google.common.base.Predicate \
-            > diagnostics/guava-predicate-verbose.txt
+          javap -classpath "$BUNDLETOOL_JAR" \
+            -c -p \
+            com.android.tools.build.bundletool.model.utils.EnumMapper \
+            | tee diagnostics/bundletool-enummapper-bytecode.txt
 
-          echo "=== Guava JAR checksum ==="
+          echo "=== Bundletool EnumMapper signatures ==="
 
-          sha256sum "$GUARDED_JAR" \
-            | tee diagnostics/guava-sha256.txt
+          javap -classpath "$BUNDLETOOL_JAR" \
+            -p \
+            com.android.tools.build.bundletool.model.utils.EnumMapper \
+            | tee diagnostics/bundletool-enummapper-signatures.txt
 
-          echo "Guava diagnostic completed."
+          echo "=== JAR checksums ==="
+
+          {
+            echo "Guava:"
+            sha256sum "$GUARDED_JAR"
+            echo
+            echo "Bundletool:"
+            sha256sum "$BUNDLETOOL_JAR"
+          } | tee diagnostics/library-checksums.txt
+
+          echo "Library diagnostics completed."
 
       - name: Diagnose APK DEX
         shell: bash
@@ -157,14 +191,20 @@ jobs:
             exit 1
           fi
 
-          echo "=== APK DEX entries ==="
+          echo "=== APK DEX files ==="
 
           unzip -Z -1 "$APK" \
             | grep -E '^classes[0-9]*\.dex$' \
             | tee diagnostics/apk-dex-files.txt
 
-          echo "=== APK file ==="
-          echo "$APK"
+          echo "=== APK information ==="
+
+          {
+            echo "APK: $APK"
+            echo
+            echo "APK SHA-256:"
+            sha256sum "$APK"
+          } | tee diagnostics/apk-information.txt
 
       - name: Prepare Android API 35
         shell: bash

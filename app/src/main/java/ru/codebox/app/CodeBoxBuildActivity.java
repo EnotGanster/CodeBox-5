@@ -1067,11 +1067,14 @@ public final class CodeBoxBuildActivity extends Activity {
 
     /**
      * Existing APK build pipeline.
+     *
+     * IOException is propagated to the
+     * outer build error handler.
      */
     private void buildSignedApk(
             File linkedResources,
             File dexFile
-    ) {
+    ) throws IOException {
 
         manager.setStage(
                 "Упаковка APK"
@@ -1169,11 +1172,14 @@ public final class CodeBoxBuildActivity extends Activity {
 
     /**
      * AAB pipeline with CMS/JAR signing.
+     *
+     * IOException is propagated to the
+     * outer build error handler.
      */
     private void buildSignedAab(
             File linkedResources,
             File dexFile
-    ) {
+    ) throws IOException {
 
         manager.setStage(
                 "Подготовка модуля base (AAB)"
@@ -1249,7 +1255,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         // -------------------------------------
-        // New stage: AAB signing.
+        // AAB signing.
         // -------------------------------------
 
         manager.setStage(

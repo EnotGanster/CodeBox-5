@@ -19,8 +19,7 @@ import java.util.regex.Pattern;
 
 /**
  * Prepares AndroidManifest.xml for local APK and AAB builds.
- *
- * Supports older projects without a manifest package attribute.
+ * Adds missing package, versionCode and versionName.
  * Does not modify the original project.
  */
 public final class CodeBoxApkManifestPreparer {
@@ -43,16 +42,13 @@ public final class CodeBoxApkManifestPreparer {
     }
 
     public static final class Result {
-
         public final File manifestFile;
         public final String applicationId;
         public final String report;
 
-        private Result(
-                File manifestFile,
-                String applicationId,
-                String report
-        ) {
+        private Result(File manifestFile,
+                       String applicationId,
+                       String report) {
             this.manifestFile = manifestFile;
             this.applicationId = applicationId;
             this.report = report;
@@ -74,56 +70,46 @@ public final class CodeBoxApkManifestPreparer {
 
         if (projectDirectory == null || workDirectory == null) {
             throw new IOException(
-                    "Не указан проект или рабочий каталог"
-            );
+                    "Не указан проект или рабочий каталог");
         }
 
         if (applicationId != null
                 && !PACKAGE.matcher(applicationId).matches()) {
             throw new IOException(
-                    "Недопустимый applicationId: " + applicationId
-            );
+                    "Недопустимый applicationId: " + applicationId);
         }
 
         File project = projectDirectory.getCanonicalFile();
 
         if (!project.isDirectory()) {
-            throw new IOException(
-                    "Каталог проекта отсутствует"
-            );
+            throw new IOException("Каталог проекта отсутствует");
         }
 
         File source = new File(
-                project,
-                "app/src/main/AndroidManifest.xml"
+                project, "app/src/main/AndroidManifest.xml"
         ).getCanonicalFile();
 
         if (!source.toPath().startsWith(project.toPath())
                 || !source.isFile()) {
-            throw new IOException(
-                    "AndroidManifest.xml не найден"
-            );
+            throw new IOException("AndroidManifest.xml не найден");
         }
 
         if (source.length() == 0
                 || source.length() > MAX_XML_BYTES) {
             throw new IOException(
-                    "Недопустимый размер AndroidManifest.xml"
-            );
+                    "Недопустимый размер AndroidManifest.xml");
         }
 
         File work = workDirectory.getCanonicalFile();
 
         if (work.toPath().startsWith(project.toPath())) {
             throw new IOException(
-                    "Рабочий каталог должен быть вне проекта"
-            );
+                    "Рабочий каталог должен быть вне проекта");
         }
 
         if (!work.isDirectory() && !work.mkdirs()) {
             throw new IOException(
-                    "Не удалось создать рабочий каталог"
-            );
+                    "Не удалось создать рабочий каталог");
         }
 
         File output = new File(
@@ -136,25 +122,27 @@ public final class CodeBoxApkManifestPreparer {
 
         if (!work.equals(output.getParentFile())
                 || !work.equals(temporary.getParentFile())) {
-            throw new IOException(
-                    "Недопустимый выходной путь"
-            );
+            throw new IOException("Недопустимый выходной путь");
         }
 
         if (temporary.exists() && !temporary.delete()) {
             throw new IOException(
-                    "Не удалось очистить временный файл"
-            );
+                    "Не удалось очистить временный файл");
         }
 
         String gradleId = readGradleApplicationId(project);
-
         String resolvedId = applicationId;
 
         boolean rootFound = false;
         boolean applicationFound = false;
         boolean launcherFound = false;
         boolean completed = false;
+
+        boolean addedVersionCode = false;
+        boolean addedVersionName = false;
+
+        String versionCode = null;
+        String versionName = null;
 
         int depth = 0;
 
@@ -164,7 +152,6 @@ public final class CodeBoxApkManifestPreparer {
         boolean launcherCategory = false;
 
         try {
-
             XmlPullParser parser = Xml.newPullParser();
 
             parser.setFeature(
@@ -179,7 +166,6 @@ public final class CodeBoxApkManifestPreparer {
                     OutputStream stream =
                             new FileOutputStream(temporary)
             ) {
-
                 parser.setInput(input, "UTF-8");
                 serializer.setOutput(stream, "UTF-8");
                 serializer.startDocument("UTF-8", true);
@@ -190,8 +176,7 @@ public final class CodeBoxApkManifestPreparer {
 
                     if (event == XmlPullParser.DOCDECL) {
                         throw new IOException(
-                                "DOCTYPE запрещён в AndroidManifest.xml"
-                        );
+                                "DOCTYPE запрещён в AndroidManifest.xml");
                     }
 
                     if (event == XmlPullParser.START_TAG) {
@@ -203,27 +188,23 @@ public final class CodeBoxApkManifestPreparer {
 
                             if (rootFound || !"manifest".equals(name)) {
                                 throw new IOException(
-                                        "Корневой элемент должен быть manifest"
-                                );
+                                        "Корневой элемент должен быть manifest");
                             }
 
                             rootFound = true;
 
                             String declared = parser.getAttributeValue(
-                                    null, "package"
-                            );
+                                    null, "package");
 
                             if (declared != null
                                     && !declared.isEmpty()
                                     && !PACKAGE.matcher(declared).matches()) {
                                 throw new IOException(
                                         "Некорректный package в манифесте: "
-                                                + declared
-                                );
+                                                + declared);
                             }
 
                             if (resolvedId == null) {
-
                                 if (declared != null
                                         && !declared.isEmpty()) {
                                     resolvedId = declared;
@@ -237,8 +218,7 @@ public final class CodeBoxApkManifestPreparer {
                                 throw new IOException(
                                         "Не удалось определить package. "
                                                 + "Проверьте AndroidManifest.xml "
-                                                + "и applicationId в app/build.gradle"
-                                );
+                                                + "и applicationId в app/build.gradle");
                             }
 
                             if (declared != null
@@ -246,16 +226,48 @@ public final class CodeBoxApkManifestPreparer {
                                     && !resolvedId.equals(declared)) {
                                 throw new IOException(
                                         "package не совпадает с applicationId: "
-                                                + declared
-                                );
+                                                + declared);
                             }
 
                             if (gradleId != null
                                     && !resolvedId.equals(gradleId)) {
                                 throw new IOException(
                                         "applicationId в Gradle не совпадает "
-                                                + "с package: " + gradleId
-                                );
+                                                + "с package: " + gradleId);
+                            }
+
+                            versionCode = parser.getAttributeValue(
+                                    ANDROID_NS, "versionCode");
+
+                            versionName = parser.getAttributeValue(
+                                    ANDROID_NS, "versionName");
+
+                            if (versionCode == null
+                                    || versionCode.trim().isEmpty()) {
+                                versionCode = "1";
+                                addedVersionCode = true;
+                            } else {
+                                versionCode = versionCode.trim();
+
+                                try {
+                                    long parsed = Long.parseLong(versionCode);
+
+                                    if (parsed < 1
+                                            || parsed > Integer.MAX_VALUE) {
+                                        throw new NumberFormatException(
+                                                "versionCode вне диапазона");
+                                    }
+                                } catch (NumberFormatException e) {
+                                    throw new IOException(
+                                            "Некорректный android:versionCode: "
+                                                    + versionCode, e);
+                                }
+                            }
+
+                            if (versionName == null
+                                    || versionName.trim().isEmpty()) {
+                                versionName = "1.0";
+                                addedVersionName = true;
                             }
                         }
 
@@ -268,14 +280,12 @@ public final class CodeBoxApkManifestPreparer {
                                 && "activity".equals(name)) {
 
                             activityName = parser.getAttributeValue(
-                                    ANDROID_NS, "name"
-                            );
+                                    ANDROID_NS, "name");
 
                             if (activityName == null
                                     || activityName.trim().isEmpty()) {
                                 throw new IOException(
-                                        "У activity отсутствует android:name"
-                                );
+                                        "У activity отсутствует android:name");
                             }
                         }
 
@@ -292,8 +302,7 @@ public final class CodeBoxApkManifestPreparer {
                                 && "action".equals(name)
                                 && "android.intent.action.MAIN".equals(
                                         parser.getAttributeValue(
-                                                ANDROID_NS, "name"
-                                        ))) {
+                                                ANDROID_NS, "name"))) {
                             mainAction = true;
                         }
 
@@ -302,8 +311,7 @@ public final class CodeBoxApkManifestPreparer {
                                 && "category".equals(name)
                                 && "android.intent.category.LAUNCHER".equals(
                                         parser.getAttributeValue(
-                                                ANDROID_NS, "name"
-                                        ))) {
+                                                ANDROID_NS, "name"))) {
                             launcherCategory = true;
                         }
 
@@ -312,7 +320,6 @@ public final class CodeBoxApkManifestPreparer {
                                 i < parser.getNamespaceCount(depth + 1);
                                 i++
                         ) {
-
                             String prefix =
                                     parser.getNamespacePrefix(i);
 
@@ -321,14 +328,12 @@ public final class CodeBoxApkManifestPreparer {
 
                             serializer.setPrefix(
                                     prefix == null ? "" : prefix,
-                                    uri == null ? "" : uri
-                            );
+                                    uri == null ? "" : uri);
                         }
 
                         serializer.startTag(
                                 namespace == null ? "" : namespace,
-                                name
-                        );
+                                name);
 
                         for (int i = 0;
                              i < parser.getAttributeCount();
@@ -347,18 +352,50 @@ public final class CodeBoxApkManifestPreparer {
                                 continue;
                             }
 
+                            if (depth == 0
+                                    && ANDROID_NS.equals(attrNamespace)
+                                    && "versionCode".equals(attrName)
+                                    && addedVersionCode) {
+                                continue;
+                            }
+
+                            if (depth == 0
+                                    && ANDROID_NS.equals(attrNamespace)
+                                    && "versionName".equals(attrName)
+                                    && addedVersionName) {
+                                continue;
+                            }
+
                             serializer.attribute(
                                     attrNamespace == null
                                             ? "" : attrNamespace,
                                     attrName,
-                                    parser.getAttributeValue(i)
-                            );
+                                    parser.getAttributeValue(i));
                         }
 
                         if (depth == 0) {
+
                             serializer.attribute(
-                                    "", "package", resolvedId
-                            );
+                                    "", "package", resolvedId);
+
+                            if (addedVersionCode || addedVersionName) {
+                                serializer.setPrefix(
+                                        "android", ANDROID_NS);
+                            }
+
+                            if (addedVersionCode) {
+                                serializer.attribute(
+                                        ANDROID_NS,
+                                        "versionCode",
+                                        versionCode);
+                            }
+
+                            if (addedVersionName) {
+                                serializer.attribute(
+                                        ANDROID_NS,
+                                        "versionName",
+                                        versionName);
+                            }
                         }
 
                         depth++;
@@ -369,8 +406,7 @@ public final class CodeBoxApkManifestPreparer {
 
                         if (depth < 0) {
                             throw new IOException(
-                                    "Неверная структура XML"
-                            );
+                                    "Неверная структура XML");
                         }
 
                         String name = parser.getName();
@@ -394,22 +430,17 @@ public final class CodeBoxApkManifestPreparer {
                         serializer.endTag(
                                 parser.getNamespace() == null
                                         ? "" : parser.getNamespace(),
-                                name
-                        );
+                                name);
 
                     } else if (event == XmlPullParser.TEXT) {
-
                         serializer.text(parser.getText());
 
                     } else if (event == XmlPullParser.CDSECT) {
-
                         serializer.cdsect(parser.getText());
 
                     } else if (event == XmlPullParser.ENTITY_REF) {
-
                         throw new IOException(
-                                "XML-сущности не поддерживаются"
-                        );
+                                "XML-сущности не поддерживаются");
                     }
 
                     event = parser.nextToken();
@@ -419,8 +450,7 @@ public final class CodeBoxApkManifestPreparer {
                         || !applicationFound
                         || depth != 0) {
                     throw new IOException(
-                            "Неполная структура AndroidManifest.xml"
-                    );
+                            "Неполная структура AndroidManifest.xml");
                 }
 
                 serializer.endDocument();
@@ -431,20 +461,17 @@ public final class CodeBoxApkManifestPreparer {
                     || temporary.length() == 0
                     || temporary.length() > MAX_XML_BYTES) {
                 throw new IOException(
-                        "Подготовленный XML пуст или слишком велик"
-                );
+                        "Подготовленный XML пуст или слишком велик");
             }
 
             if (output.exists() && !output.delete()) {
                 throw new IOException(
-                        "Не удалось заменить прежний XML"
-                );
+                        "Не удалось заменить прежний XML");
             }
 
             if (!temporary.renameTo(output)) {
                 throw new IOException(
-                        "Не удалось сохранить подготовленный XML"
-                );
+                        "Не удалось сохранить подготовленный XML");
             }
 
             completed = true;
@@ -455,32 +482,34 @@ public final class CodeBoxApkManifestPreparer {
                     "MANIFEST_PREPARED: OK"
                             + "\napplicationId: " + resolvedId
                             + "\nGradle applicationId: "
-                            + (gradleId == null ? "не найден" : gradleId)
+                            + (gradleId == null
+                                    ? "не найден" : gradleId)
+                            + "\nversionCode: " + versionCode
+                            + (addedVersionCode
+                                    ? " (добавлен автоматически)"
+                                    : " (из манифеста)")
+                            + "\nversionName: " + versionName
+                            + (addedVersionName
+                                    ? " (добавлен автоматически)"
+                                    : " (из манифеста)")
                             + "\nФайл: " + output.getAbsolutePath()
                             + "\nРазмер: " + output.length() + " байт"
                             + "\nLauncher activity: "
-                            + (launcherFound ? "найдена" : "не найдена")
+                            + (launcherFound
+                                    ? "найдена" : "не найдена")
                             + "\nФормат: текстовый XML для AAPT2"
             );
 
         } catch (XmlPullParserException e) {
-
             throw new IOException(
-                    "Ошибка XML-парсера: " + e.getMessage(), e
-            );
-
+                    "Ошибка XML-парсера: " + e.getMessage(), e);
         } finally {
-
             if (!completed && temporary.exists()) {
                 temporary.delete();
             }
         }
     }
 
-    /**
-     * Reads a literal applicationId from the project's Gradle file.
-     * Does not execute Gradle scripts.
-     */
     private static String readGradleApplicationId(
             File project
     ) throws IOException {
@@ -491,8 +520,7 @@ public final class CodeBoxApkManifestPreparer {
 
         if (!gradle.toPath().startsWith(project.toPath())) {
             throw new IOException(
-                    "Недопустимый путь app/build.gradle"
-            );
+                    "Недопустимый путь app/build.gradle");
         }
 
         if (!gradle.isFile()) {
@@ -501,14 +529,12 @@ public final class CodeBoxApkManifestPreparer {
 
         if (gradle.length() > MAX_GRADLE_BYTES) {
             throw new IOException(
-                    "Слишком большой app/build.gradle"
-            );
+                    "Слишком большой app/build.gradle");
         }
 
         String content = new String(
                 Files.readAllBytes(gradle.toPath()),
-                StandardCharsets.UTF_8
-        );
+                StandardCharsets.UTF_8);
 
         Matcher matcher = APPLICATION_ID.matcher(content);
 
@@ -520,8 +546,7 @@ public final class CodeBoxApkManifestPreparer {
 
         if (!PACKAGE.matcher(id).matches()) {
             throw new IOException(
-                    "Некорректный applicationId в Gradle: " + id
-            );
+                    "Некорректный applicationId в Gradle: " + id);
         }
 
         return id;

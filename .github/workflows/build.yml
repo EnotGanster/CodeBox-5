@@ -31,18 +31,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p diagnostics
-
-          echo "=== Guava dependency insight ==="
 
           gradle --no-daemon \
             :app:dependencyInsight \
             --configuration debugRuntimeClasspath \
             --dependency com.google.guava:guava \
             | tee diagnostics/guava-dependency-insight.txt
-
-          echo "=== Runtime dependencies ==="
 
           gradle --no-daemon \
             :app:dependencies \
@@ -52,14 +47,11 @@ jobs:
       - name: Build Debug APK
         run: gradle --no-daemon assembleDebug
 
-      - name: Diagnose Guava and bundletool bytecode
+      - name: Resolve Guava and bundletool
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p diagnostics
-
-          echo "=== Create Gradle inspection task ==="
 
           cat > diagnostics/inspect-libraries.gradle <<'EOF'
           allprojects {
@@ -92,8 +84,7 @@ jobs:
                                           'com.android.tools.build'
                                           && id.name == 'bundletool') {
                                       println(
-                                          'BUNDLETOOL_VERSION=' +
-                                          id.version
+                                          'BUNDLETOOL_VERSION=' + id.version
                                       )
                                       println(
                                           'BUNDLETOOL_JAR=' +
@@ -107,8 +98,6 @@ jobs:
               }
           }
           EOF
-
-          echo "=== Resolve runtime JARs ==="
 
           gradle --no-daemon \
             --init-script diagnostics/inspect-libraries.gradle \
@@ -125,17 +114,8 @@ jobs:
             diagnostics/resolved-libraries.txt \
             | tail -n 1)
 
-          if [ -z "$GUARDED_JAR" ] || \
-             [ ! -s "$GUARDED_JAR" ]; then
-            echo "ERROR: Guava JAR not found"
-            exit 1
-          fi
-
-          if [ -z "$BUNDLETOOL_JAR" ] || \
-             [ ! -s "$BUNDLETOOL_JAR" ]; then
-            echo "ERROR: bundletool JAR not found"
-            exit 1
-          fi
+          test -s "$GUARDED_JAR"
+          test -s "$BUNDLETOOL_JAR"
 
           echo "=== Guava Predicate ==="
 
@@ -149,62 +129,180 @@ jobs:
             -p 'com.google.common.base.Predicates$NotPredicate' \
             | tee diagnostics/guava-not-predicate.txt
 
-          echo "=== Bundletool EnumMapper bytecode ==="
+          echo "=== Original EnumMapper ==="
 
           javap -classpath "$BUNDLETOOL_JAR" \
             -c -p \
             com.android.tools.build.bundletool.model.utils.EnumMapper \
             | tee diagnostics/bundletool-enummapper-bytecode.txt
 
-          echo "=== Bundletool EnumMapper signatures ==="
-
-          javap -classpath "$BUNDLETOOL_JAR" \
-            -p \
-            com.android.tools.build.bundletool.model.utils.EnumMapper \
-            | tee diagnostics/bundletool-enummapper-signatures.txt
-
           echo "=== JAR checksums ==="
 
           {
-            echo "Guava:"
             sha256sum "$GUARDED_JAR"
-            echo
-            echo "Bundletool:"
             sha256sum "$BUNDLETOOL_JAR"
           } | tee diagnostics/library-checksums.txt
 
-          echo "Library diagnostics completed."
+      - name: Compile EnumMapper compatibility candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p diagnostics/patch-src
+          mkdir -p diagnostics/patch-classes
+          mkdir -p diagnostics/patch-output
+
+          GUARDED_JAR=$(sed -n \
+            's/^GUAVA_JAR=//p' \
+            diagnostics/resolved-libraries.txt \
+            | tail -n 1)
+
+          BUNDLETOOL_JAR=$(sed -n \
+            's/^BUNDLETOOL_JAR=//p' \
+            diagnostics/resolved-libraries.txt \
+            | tail -n 1)
+
+          cat > diagnostics/patch-src/EnumMapper.java <<'EOF'
+          package com.android.tools.build.bundletool.model.utils;
+
+          import com.google.common.collect.ImmutableBiMap;
+          import com.google.common.collect.ImmutableSet;
+          import com.google.common.collect.ImmutableSortedMap;
+          import com.google.common.collect.Ordering;
+
+          import java.util.EnumSet;
+          import java.util.function.Predicate;
+
+          public final class EnumMapper {
+
+              private EnumMapper() {
+              }
+
+              public static <E1 extends Enum<E1>, E2 extends Enum<E2>>
+                      ImmutableBiMap<E1, E2> mapByName(
+                              Class<E1> first,
+                              Class<E2> second) {
+
+                  return mapByName(
+                          first,
+                          second,
+                          ImmutableSet.of()
+                  );
+              }
+
+              public static <E1 extends Enum<E1>, E2 extends Enum<E2>>
+                      ImmutableBiMap<E1, E2> mapByName(
+                              Class<E1> first,
+                              Class<E2> second,
+                              ImmutableSet<E1> excluded) {
+
+                  ImmutableSortedMap<String, E1> left =
+                          enumValuesByName(first, excluded);
+
+                  ImmutableSortedMap<String, E2> right =
+                          enumValuesByName(
+                                  second,
+                                  ImmutableSet.of()
+                          );
+
+                  if (!left.keySet().equals(right.keySet())) {
+                      throw new IllegalArgumentException(
+                              "Enum values differ: "
+                                      + left.keySet()
+                                      + " vs "
+                                      + right.keySet()
+                      );
+                  }
+
+                  ImmutableBiMap.Builder<E1, E2> builder =
+                          ImmutableBiMap.builder();
+
+                  for (String name : left.keySet()) {
+                      builder.put(
+                              left.get(name),
+                              right.get(name)
+                      );
+                  }
+
+                  return builder.build();
+              }
+
+              private static <E extends Enum<E>>
+                      ImmutableSortedMap<String, E> enumValuesByName(
+                              Class<E> enumClass,
+                              ImmutableSet<E> excluded) {
+
+                  Predicate<E> included =
+                          value -> !excluded.contains(value);
+
+                  return EnumSet.allOf(enumClass)
+                          .stream()
+                          .filter(included)
+                          .sorted()
+                          .collect(
+                                  ImmutableSortedMap.toImmutableSortedMap(
+                                          Ordering.natural(),
+                                          Enum::name,
+                                          value -> value
+                                  )
+                          );
+              }
+          }
+          EOF
+
+          echo "=== Compile compatibility candidate ==="
+
+          javac --release 8 \
+            -cp "$GUARDED_JAR:$BUNDLETOOL_JAR" \
+            -d diagnostics/patch-classes \
+            diagnostics/patch-src/EnumMapper.java \
+            2>&1 | tee diagnostics/patch-compile.txt
+
+          echo "=== Inspect patched bytecode ==="
+
+          javap -classpath diagnostics/patch-classes \
+            -c -p \
+            com.android.tools.build.bundletool.model.utils.EnumMapper \
+            | tee diagnostics/patched-enummapper-bytecode.txt
+
+          echo "=== Package patch candidate ==="
+
+          jar --create \
+            --file diagnostics/patch-output/enummapper-candidate.jar \
+            -C diagnostics/patch-classes .
+
+          echo "=== Verify patch JAR ==="
+
+          jar tf \
+            diagnostics/patch-output/enummapper-candidate.jar \
+            | tee diagnostics/patch-jar-contents.txt
+
+          sha256sum \
+            diagnostics/patch-output/enummapper-candidate.jar \
+            | tee diagnostics/patch-sha256.txt
+
+          echo "Patch candidate compiled successfully."
+          echo "It has NOT been integrated into the Android APK."
 
       - name: Diagnose APK DEX
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p diagnostics
 
           APK=$(find app/build/outputs/apk/debug \
             -maxdepth 1 -type f -name '*.apk' \
             -print -quit)
 
-          if [ -z "$APK" ]; then
-            echo "ERROR: Debug APK not found"
-            exit 1
-          fi
-
-          echo "=== APK DEX files ==="
+          test -n "$APK"
+          test -s "$APK"
 
           unzip -Z -1 "$APK" \
             | grep -E '^classes[0-9]*\.dex$' \
             | tee diagnostics/apk-dex-files.txt
 
-          echo "=== APK information ==="
-
-          {
-            echo "APK: $APK"
-            echo
-            echo "APK SHA-256:"
-            sha256sum "$APK"
-          } | tee diagnostics/apk-information.txt
+          sha256sum "$APK" \
+            | tee diagnostics/apk-sha256.txt
 
       - name: Prepare Android API 35
         shell: bash
@@ -221,9 +319,6 @@ jobs:
           JAR="$SDK/platforms/android-35/android.jar"
 
           if [ ! -s "$JAR" ]; then
-            echo "Android API 35 is missing."
-            echo "Installing Android SDK Platform 35..."
-
             SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
             if [ ! -x "$SDKMANAGER" ]; then
@@ -234,10 +329,7 @@ jobs:
             "$SDKMANAGER" "platforms;android-35"
           fi
 
-          if [ ! -s "$JAR" ]; then
-            echo "ERROR: android.jar missing or empty"
-            exit 1
-          fi
+          test -s "$JAR"
 
           mkdir -p android-api-export
 
@@ -272,5 +364,14 @@ jobs:
         with:
           name: CodeBox-5-Guava-Diagnostics
           path: diagnostics/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload EnumMapper patch candidate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodeBox-5-EnumMapper-Patch
+          path: diagnostics/patch-output/
           if-no-files-found: warn
           retention-days: 30

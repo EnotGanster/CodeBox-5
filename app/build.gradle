@@ -22,8 +22,7 @@ android {
 
     packaging {
         jniLibs {
-            // Извлекать libaapt2.so из APK
-            // в каталог нативных библиотек.
+            // Извлекать libaapt2.so из APK.
             useLegacyPackaging = true
         }
     }
@@ -35,22 +34,32 @@ android {
 }
 
 dependencies {
-    // Проверенный ECJ для Android 12.
+
+    // Локальный Java-компилятор ECJ.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // Рабочая компиляция CLASS -> DEX.
+    // Компиляция CLASS -> DEX.
     implementation 'com.android.tools:r8:8.7.18'
 
-    // Подпись APK и проверка подписи.
+    // Подпись APK.
     implementation 'com.android.tools.build:apksig:8.7.3'
 
     // Создание Android App Bundle.
     implementation 'com.android.tools.build:bundletool:1.18.2'
 
-    // Protocol Buffers для BundleConfig.
+    // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Google Guava: проверка JRE-варианта
-    // для устранения конфликта Predicate в bundletool.
-    implementation 'com.google.guava:guava:33.3.1-jre'
+    // Явно выбираем JRE-вариант Guava.
+    implementation('com.google.guava:guava:33.3.1-jre') {
+        attributes {
+            attribute(
+                org.gradle.api.attributes.java.TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+                objects.named(
+                    org.gradle.api.attributes.java.TargetJvmEnvironment,
+                    org.gradle.api.attributes.java.TargetJvmEnvironment.STANDARD_JVM
+                )
+            )
+        }
+    }
 }

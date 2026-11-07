@@ -22,6 +22,7 @@ android {
 
     packaging {
         jniLibs {
+            // Извлекать libaapt2.so из APK.
             useLegacyPackaging = true
         }
     }
@@ -36,6 +37,8 @@ android {
 // CodeBox 5 — зависимости bundletool
 // --------------------------------------------------
 
+// Получаем транзитивные зависимости bundletool,
+// не добавляя оригинальный bundletool.jar в APK.
 configurations {
     bundletoolDependencies {
         transitive = true
@@ -43,21 +46,8 @@ configurations {
 }
 
 // --------------------------------------------------
-// Единая версия Guava для Android
+// Основные зависимости CodeBox 5
 // --------------------------------------------------
-
-configurations.configureEach {
-    resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'com.google.guava'
-                && details.requested.name == 'guava') {
-
-            details.useVersion '33.3.1-android'
-            details.because(
-                'CodeBox runs bundletool on Android'
-            )
-        }
-    }
-}
 
 dependencies {
 
@@ -71,11 +61,12 @@ dependencies {
     implementation 'com.android.tools.build:apksig:8.7.3'
 
     // Исправленный bundletool 1.18.2.
+    // В JAR уже находятся наши исправления.
     implementation files(
         'libs/bundletool-patched-1.18.2.jar'
     )
 
-    // Метаданные транзитивных зависимостей.
+    // Получение зависимостей оригинального bundletool.
     bundletoolDependencies(
         'com.android.tools.build:bundletool:1.18.2'
     )
@@ -83,12 +74,12 @@ dependencies {
     // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Guava для Android.
-    implementation 'com.google.guava:guava:33.3.1-android'
+    // Полная версия Guava.
+    implementation 'com.google.guava:guava:33.3.1-jre'
 }
 
 // --------------------------------------------------
-// Подключение зависимостей оригинального bundletool
+// Подключение транзитивных зависимостей bundletool
 // --------------------------------------------------
 
 def bundletoolDependencyArtifacts =
@@ -138,7 +129,7 @@ afterEvaluate {
 }
 
 // --------------------------------------------------
-// Диагностика Guava
+// Проверка Guava Streams в JAR
 // --------------------------------------------------
 
 tasks.register('verifyGuavaStreams') {
@@ -157,7 +148,7 @@ tasks.register('verifyGuavaStreams') {
 
         if (guavaArtifacts.isEmpty()) {
             throw new GradleException(
-                'Guava не найдена в debugRuntimeClasspath'
+                'GUAVA: MISSING'
             )
         }
 
@@ -176,6 +167,7 @@ tasks.register('verifyGuavaStreams') {
             def zip = new java.util.zip.ZipFile(jarFile)
 
             try {
+
                 def entry = zip.getEntry(
                     'com/google/common/collect/Streams.class'
                 )
@@ -195,8 +187,122 @@ tasks.register('verifyGuavaStreams') {
     }
 }
 
-tasks.matching {
-    it.name == 'assembleDebug'
-}.configureEach {
+// --------------------------------------------------
+// Проверка Streams в собранном APK
+// --------------------------------------------------
+
+tasks.register('verifyGuavaInApk') {
+
+    dependsOn 'assembleDebug'
+
+    doLast {
+
+        def apkFile = file(
+            "$buildDir/outputs/apk/debug/app-debug.apk"
+        )
+
+        if (!apkFile.isFile()) {
+            throw new GradleException(
+                "APK_NOT_FOUND: ${apkFile.absolutePath}"
+            )
+        }
+
+        println "APK_FOUND: ${apkFile.absolutePath}"
+        println "APK_SIZE: ${apkFile.length()}"
+
+        def zip = new java.util.zip.ZipFile(apkFile)
+
+        try {
+
+            def dexEntries = []
+
+            def entries = zip.entries()
+
+            while (entries.hasMoreElements()) {
+
+                def entry = entries.nextElement()
+
+                if (entry.name ==~ /classes(\d*)\.dex/) {
+                    dexEntries.add(entry)
+                }
+            }
+
+            if (dexEntries.isEmpty()) {
+                throw new GradleException(
+                    'APK_DEX: MISSING'
+                )
+            }
+
+            println "APK_DEX_FILES: ${dexEntries.size()}"
+
+            // DEX хранит имена классов в таблице строк.
+            // Ищем дескриптор Streams во всех DEX.
+            def descriptor =
+                'Lcom/google/common/collect/Streams;'
+                    .getBytes('UTF-8')
+
+            boolean found = false
+
+            dexEntries.each { entry ->
+
+                def input = zip.getInputStream(entry)
+
+                try {
+
+                    byte[] bytes = input.bytes
+
+                    for (int i = 0;
+                         i <= bytes.length - descriptor.length;
+                         i++) {
+
+                        boolean match = true
+
+                        for (int j = 0;
+                             j < descriptor.length;
+                             j++) {
+
+                            if (bytes[i + j] != descriptor[j]) {
+                                match = false
+                                break
+                            }
+                        }
+
+                        if (match) {
+                            found = true
+                            println "STREAMS_DESCRIPTOR_FOUND_IN: ${entry.name}"
+                            break
+                        }
+                    }
+
+                } finally {
+                    input.close()
+                }
+            }
+
+            if (!found) {
+                throw new GradleException(
+                    'APK_GUAVA_STREAMS: MISSING'
+                )
+            }
+
+            println 'APK_GUAVA_STREAMS: FOUND'
+
+        } finally {
+            zip.close()
+        }
+    }
+}
+
+// --------------------------------------------------
+// Запуск проверок
+// --------------------------------------------------
+
+tasks.named('assembleDebug') {
     dependsOn tasks.named('verifyGuavaStreams')
+}
+
+// Проверяем итоговый APK при обычной сборке.
+// finalizedBy запускает проверку после assembleDebug.
+tasks.named('assembleDebug') {
+    finalizedBy tasks.named('verifyGuavaInApk')
 }

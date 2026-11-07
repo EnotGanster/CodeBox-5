@@ -20,9 +20,25 @@ android {
         }
     }
 
+    // -----------------------------------------
+    // Packaging configuration
+    // -----------------------------------------
+
     packaging {
+
         jniLibs {
             useLegacyPackaging = true
+        }
+
+        resources {
+
+            // Bouncy Castle libraries contain
+            // duplicate OSGi manifest resources.
+            // Exclude them from APK packaging.
+
+            excludes += [
+                'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
+            ]
         }
     }
 
@@ -69,16 +85,28 @@ configurations.configureEach { config ->
 
 dependencies {
 
-    // Java compiler.
+    // -----------------------------------------
+    // Java compiler
+    // -----------------------------------------
+
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // CLASS to DEX.
+    // -----------------------------------------
+    // CLASS to DEX
+    // -----------------------------------------
+
     implementation 'com.android.tools:r8:8.7.18'
 
-    // APK signing.
+    // -----------------------------------------
+    // APK signing
+    // -----------------------------------------
+
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // Patched bundletool.
+    // -----------------------------------------
+    // Patched bundletool
+    // -----------------------------------------
+
     implementation files(
         'libs/bundletool-patched-1.18.2.jar'
     )
@@ -88,10 +116,16 @@ dependencies {
         'com.android.tools.build:bundletool:1.18.2'
     )
 
-    // Protocol Buffers.
+    // -----------------------------------------
+    // Protocol Buffers
+    // -----------------------------------------
+
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Full JRE Guava JAR.
+    // -----------------------------------------
+    // Full Guava JRE
+    // -----------------------------------------
+
     guavaJreJar(
         'com.google.guava:guava:33.3.1-jre@jar'
     )
@@ -105,7 +139,7 @@ dependencies {
     implementation 'com.google.guava:failureaccess:1.0.2'
 
     // -----------------------------------------
-    // AAB JAR signing - Bouncy Castle
+    // AAB signing - Bouncy Castle
     // -----------------------------------------
 
     // Cryptographic algorithms and ASN.1.

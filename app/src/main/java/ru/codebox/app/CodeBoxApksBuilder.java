@@ -1,4 +1,3 @@
-
 package ru.codebox.app;
 
 import android.content.Context;
@@ -10,26 +9,51 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
+
 import java.util.Arrays;
 import java.util.Comparator;
 
 /**
  * CodeBox 5 - APKS Builder.
  *
- * Diagnostic version for the patched
- * bundletool 1.18.2 runtime.
+ * Diagnostic stage 2.
  *
- * Inspects the available BuildApksCommand API
- * without guessing unavailable classes.
+ * Inspects:
+ * - BuildApksCommand
+ * - Aapt2Command
+ * - SigningConfiguration
+ * - SigningConfigurationProvider
+ * - APK build modes
+ * - AAPT2 executable availability
  *
- * Does not modify the existing AAB pipeline.
+ * Does not generate APKs.
+ * Does not create or modify signing keys.
+ * Does not change the existing AAB pipeline.
+ *
+ * Run on a background thread.
  */
 public final class CodeBoxApksBuilder {
 
     private static final long MAX_AAB_BYTES =
             512L * 1024L * 1024L;
+
+    private static final String AAPT2_CLASS =
+            "com.android.tools.build.bundletool."
+                    + "androidtools.Aapt2Command";
+
+    private static final String SIGNING_CLASS =
+            "com.android.tools.build.bundletool."
+                    + "model.SigningConfiguration";
+
+    private static final String SIGNING_PROVIDER_CLASS =
+            "com.android.tools.build.bundletool."
+                    + "model.SigningConfigurationProvider";
 
     private CodeBoxApksBuilder() {
     }
@@ -62,223 +86,662 @@ public final class CodeBoxApksBuilder {
 
         StringBuilder log = new StringBuilder();
 
-        log.append("CodeBox 5 - APKS Builder\n");
-        log.append("========================\n");
+        log.append(
+                "CodeBox 5 - APKS Builder\n"
+        );
+
+        log.append(
+                "========================\n"
+        );
+
+        log.append(
+                "Diagnostic stage: 2\n"
+        );
 
         try {
 
-            if (context == null) {
-                throw new IOException(
-                        "Context отсутствует"
-                );
-            }
-
-            if (Build.VERSION.SDK_INT < 26) {
-                throw new IOException(
-                        "Требуется Android API 26+"
-                );
-            }
-
-            if (projectName == null
-                    || !projectName.matches(
-                            "[A-Za-z][A-Za-z0-9_]{0,49}"
-                    )) {
-                throw new IOException(
-                        "Недопустимое имя проекта"
-                );
-            }
-
-            if (aabFile == null
-                    || !aabFile.isFile()
-                    || aabFile.length() == 0) {
-                throw new IOException(
-                        "Исходный AAB отсутствует"
-                );
-            }
-
-            if (aabFile.length() > MAX_AAB_BYTES) {
-                throw new IOException(
-                        "Исходный AAB слишком большой"
-                );
-            }
-
-            log.append("\n--- Device ---\n");
-
-            log.append("Android API: ")
-                    .append(Build.VERSION.SDK_INT)
-                    .append('\n');
-
-            log.append("\n--- Input ---\n");
-
-            log.append("Project: ")
-                    .append(projectName)
-                    .append('\n');
-
-            log.append("AAB: ")
-                    .append(aabFile.getAbsolutePath())
-                    .append('\n');
-
-            log.append("AAB size: ")
-                    .append(aabFile.length())
-                    .append(" bytes\n");
-
-            File outputDir = new File(
-                    context.getCacheDir(),
-                    "apks-output-" + projectName
+            validateInputs(
+                    context,
+                    aabFile,
+                    projectName
             );
 
-            if (!outputDir.isDirectory()
-                    && !outputDir.mkdirs()) {
-                throw new IOException(
-                        "Не удалось создать каталог APKS"
-                );
-            }
+            appendDeviceInfo(log);
 
-            File output = new File(
-                    outputDir,
+            appendInputInfo(
+                    log,
+                    aabFile,
+                    projectName
+            );
+
+            File outputDirectory =
+                    prepareOutputDirectory(
+                            context,
+                            projectName
+                    );
+
+            File plannedOutput = new File(
+                    outputDirectory,
                     projectName + ".apks"
             );
 
-            log.append("Planned output: ")
-                    .append(output.getAbsolutePath())
-                    .append('\n');
+            log.append(
+                    "\n--- Planned output ---\n"
+            );
 
-            log.append("\n--- Bundletool classes ---\n");
+            log.append(
+                    plannedOutput.getAbsolutePath()
+            ).append('\n');
+
+            /*
+             * This version intentionally does not
+             * delete existing APKS or APK files.
+             */
+
+            inspectBuildApksCommand(log);
+
+            inspectAapt2Command(log);
+
+            inspectSigningConfiguration(log);
+
+            inspectSigningProvider(log);
+
+            inspectBuildModes(log);
+
+            inspectAapt2Executable(
+                    context,
+                    log
+            );
+
+            log.append(
+                    "\n--- Final result ---\n"
+            );
+
+            log.append(
+                    "AAPT2_API_DIAGNOSTICS: COMPLETE\n"
+            );
+
+            log.append(
+                    "SIGNING_API_DIAGNOSTICS: COMPLETE\n"
+            );
+
+            log.append(
+                    "APKS_GENERATION: NOT_STARTED\n"
+            );
+
+            log.append(
+                    "APK_SIGNING: NOT_STARTED\n"
+            );
+
+            log.append(
+                    "Status: DIAGNOSTICS_COMPLETE\n"
+            );
+
+            return new Result(
+                    false,
+                    null,
+                    null,
+                    log.toString()
+            );
+
+        } catch (Throwable error) {
+
+            log.append(
+                    "\n--- Diagnostic failure ---\n"
+            );
+
+            appendError(
+                    log,
+                    error
+            );
+
+            log.append(
+                    "Status: FAILED\n"
+            );
+
+            return new Result(
+                    false,
+                    null,
+                    null,
+                    log.toString()
+            );
+        }
+    }
+
+    private static void validateInputs(
+            Context context,
+            File aabFile,
+            String projectName
+    ) throws IOException {
+
+        if (context == null) {
+            throw new IOException(
+                    "Context отсутствует"
+            );
+        }
+
+        if (Build.VERSION.SDK_INT < 26) {
+            throw new IOException(
+                    "Требуется Android API 26+"
+            );
+        }
+
+        if (projectName == null
+                || !projectName.matches(
+                        "[A-Za-z][A-Za-z0-9_]{0,49}"
+                )) {
+
+            throw new IOException(
+                    "Недопустимое имя проекта"
+            );
+        }
+
+        if (aabFile == null
+                || !aabFile.isFile()
+                || aabFile.length() == 0) {
+
+            throw new IOException(
+                    "Исходный AAB отсутствует"
+            );
+        }
+
+        if (aabFile.length() > MAX_AAB_BYTES) {
+            throw new IOException(
+                    "Исходный AAB слишком большой"
+            );
+        }
+    }
+
+    private static File prepareOutputDirectory(
+            Context context,
+            String projectName
+    ) throws IOException {
+
+        File directory = new File(
+                context.getCacheDir(),
+                "apks-output-" + projectName
+        );
+
+        if (!directory.isDirectory()
+                && !directory.mkdirs()) {
+
+            throw new IOException(
+                    "Не удалось создать каталог APKS"
+            );
+        }
+
+        return directory;
+    }
+
+    private static void appendDeviceInfo(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- Device ---\n"
+        );
+
+        log.append("Android API: ")
+                .append(Build.VERSION.SDK_INT)
+                .append('\n');
+
+        log.append("Device: ")
+                .append(Build.MANUFACTURER)
+                .append(' ')
+                .append(Build.MODEL)
+                .append('\n');
+
+        log.append("Supported ABI:\n");
+
+        for (String abi : Build.SUPPORTED_ABIS) {
+
+            log.append(" - ")
+                    .append(abi)
+                    .append('\n');
+        }
+    }
+
+    private static void appendInputInfo(
+            StringBuilder log,
+            File aabFile,
+            String projectName
+    ) {
+
+        log.append(
+                "\n--- Input ---\n"
+        );
+
+        log.append("Project: ")
+                .append(projectName)
+                .append('\n');
+
+        log.append("AAB: ")
+                .append(aabFile.getAbsolutePath())
+                .append('\n');
+
+        log.append("AAB size: ")
+                .append(aabFile.length())
+                .append(" bytes\n");
+    }
+
+    private static void inspectBuildApksCommand(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- BuildApksCommand ---\n"
+        );
+
+        try {
+
+            Class<?> commandClass =
+                    BuildApksCommand.class;
 
             appendClassInfo(
                     log,
-                    "BuildApksCommand",
-                    BuildApksCommand.class
+                    commandClass
             );
 
             Class<?> builderClass =
-                    findBuilderClass();
+                    Class.forName(
+                            "com.android.tools.build."
+                                    + "bundletool.commands."
+                                    + "BuildApksCommand$Builder"
+                    );
+
+            log.append(
+                    "\nBuilder:\n"
+            );
 
             appendClassInfo(
                     log,
-                    "BuildApksCommand.Builder",
                     builderClass
             );
 
-            log.append("\n--- Builder methods ---\n");
+            log.append(
+                    "\nRelevant builder methods:\n"
+            );
 
             Method[] methods =
                     builderClass.getMethods();
 
-            Arrays.sort(
-                    methods,
-                    Comparator.comparing(Method::getName)
-                            .thenComparing(Method::toString)
-            );
+            sortMethods(methods);
 
             for (Method method : methods) {
 
                 String name = method.getName();
 
-                if (name.startsWith("set")
-                        || "build".equals(name)) {
+                if (name.equals("build")
+                        || name.equals("setAapt2Command")
+                        || name.equals("setSigningConfiguration")
+                        || name.equals("setSigningConfigurationProvider")
+                        || name.equals("setBundlePath")
+                        || name.equals("setOutputFile")
+                        || name.equals("setApkBuildMode")
+                        || name.equals("setOverwriteOutput")
+                        || name.equals("setOutputFormat")
+                        || name.equals("setCreateApkSetArchive")) {
 
-                    log.append(
-                            Modifier.toString(
-                                    method.getModifiers()
-                            )
+                    appendMethod(
+                            log,
+                            method
                     );
-
-                    log.append(' ');
-
-                    log.append(
-                            method.getReturnType().getName()
-                    );
-
-                    log.append(' ');
-                    log.append(name);
-                    log.append('(');
-
-                    Class<?>[] parameters =
-                            method.getParameterTypes();
-
-                    for (int i = 0;
-                            i < parameters.length;
-                            i++) {
-
-                        if (i > 0) {
-                            log.append(", ");
-                        }
-
-                        log.append(
-                                parameters[i].getName()
-                        );
-                    }
-
-                    log.append(")\n");
                 }
             }
 
-            log.append("\n--- Signing methods ---\n");
+            log.append(
+                    "\nBuilder factory methods:\n"
+            );
 
-            int signingMethods = 0;
+            for (Method method :
+                    commandClass.getDeclaredMethods()) {
+
+                if (Modifier.isStatic(
+                        method.getModifiers()
+                )) {
+
+                    if (method.getName()
+                            .toLowerCase()
+                            .contains("builder")) {
+
+                        appendMethod(
+                                log,
+                                method
+                        );
+                    }
+                }
+            }
+
+        } catch (Throwable error) {
+
+            appendSectionError(
+                    log,
+                    "BuildApksCommand",
+                    error
+            );
+        }
+    }
+
+    private static void inspectAapt2Command(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- Aapt2Command API ---\n"
+        );
+
+        try {
+
+            Class<?> type =
+                    Class.forName(
+                            AAPT2_CLASS
+                    );
+
+            appendClassInfo(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nConstructors:\n"
+            );
+
+            Constructor<?>[] constructors =
+                    type.getDeclaredConstructors();
+
+            for (Constructor<?> constructor :
+                    constructors) {
+
+                log.append(
+                        constructor.toGenericString()
+                ).append('\n');
+            }
+
+            log.append(
+                    "\nStatic factory methods:\n"
+            );
+
+            Method[] methods =
+                    type.getDeclaredMethods();
+
+            sortMethods(methods);
+
+            int factories = 0;
 
             for (Method method : methods) {
 
-                String name =
-                        method.getName().toLowerCase();
+                if (Modifier.isStatic(
+                        method.getModifiers()
+                )) {
 
-                if (name.contains("sign")
-                        || name.contains("key")
-                        || name.contains("password")
-                        || name.contains("aapt")) {
+                    appendMethod(
+                            log,
+                            method
+                    );
 
-                    log.append(method.toString())
-                            .append('\n');
-
-                    signingMethods++;
+                    factories++;
                 }
             }
 
-            log.append("Matching methods: ")
-                    .append(signingMethods)
-                    .append('\n');
+            log.append(
+                    "Static methods found: "
+            ).append(factories).append('\n');
 
-            log.append("\n--- APK build modes ---\n");
+            log.append(
+                    "\nInstance methods:\n"
+            );
 
-            try {
+            for (Method method : methods) {
 
-                Class<?> modeClass =
-                        Class.forName(
-                                "com.android.tools.build."
-                                        + "bundletool.commands."
-                                        + "BuildApksCommand$ApkBuildMode"
-                        );
+                if (!Modifier.isStatic(
+                        method.getModifiers()
+                )) {
 
-                Object[] values =
-                        modeClass.getEnumConstants();
-
-                if (values != null) {
-
-                    for (Object value : values) {
-
-                        log.append("Mode: ")
-                                .append(value)
-                                .append('\n');
-                    }
-
-                } else {
-
-                    log.append(
-                            "ApkBuildMode is not an enum\n"
+                    appendMethod(
+                            log,
+                            method
                     );
                 }
+            }
 
-            } catch (Throwable error) {
+            log.append(
+                    "\nFields:\n"
+            );
 
-                log.append("Mode diagnostic: ")
-                        .append(error.getClass().getName())
-                        .append(": ")
-                        .append(error.getMessage())
+            appendFields(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nAAPT2_CLASS_FOUND: true\n"
+            );
+
+        } catch (Throwable error) {
+
+            appendSectionError(
+                    log,
+                    "Aapt2Command",
+                    error
+            );
+        }
+    }
+
+    private static void inspectSigningConfiguration(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- SigningConfiguration API ---\n"
+        );
+
+        try {
+
+            Class<?> type =
+                    Class.forName(
+                            SIGNING_CLASS
+                    );
+
+            appendClassInfo(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nConstructors:\n"
+            );
+
+            for (Constructor<?> constructor :
+                    type.getDeclaredConstructors()) {
+
+                log.append(
+                        constructor.toGenericString()
+                ).append('\n');
+            }
+
+            log.append(
+                    "\nStatic methods:\n"
+            );
+
+            Method[] methods =
+                    type.getDeclaredMethods();
+
+            sortMethods(methods);
+
+            for (Method method : methods) {
+
+                if (Modifier.isStatic(
+                        method.getModifiers()
+                )) {
+
+                    appendMethod(
+                            log,
+                            method
+                    );
+                }
+            }
+
+            log.append(
+                    "\nInstance methods:\n"
+            );
+
+            for (Method method : methods) {
+
+                if (!Modifier.isStatic(
+                        method.getModifiers()
+                )) {
+
+                    appendMethod(
+                            log,
+                            method
+                    );
+                }
+            }
+
+            log.append(
+                    "\nFields:\n"
+            );
+
+            appendFields(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nSIGNING_CONFIGURATION_FOUND: true\n"
+            );
+
+        } catch (Throwable error) {
+
+            appendSectionError(
+                    log,
+                    "SigningConfiguration",
+                    error
+            );
+        }
+    }
+
+    private static void inspectSigningProvider(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- SigningConfigurationProvider API ---\n"
+        );
+
+        try {
+
+            Class<?> type =
+                    Class.forName(
+                            SIGNING_PROVIDER_CLASS
+                    );
+
+            appendClassInfo(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nInterface: "
+            ).append(type.isInterface())
+                    .append('\n');
+
+            log.append(
+                    "\nMethods:\n"
+            );
+
+            Method[] methods =
+                    type.getDeclaredMethods();
+
+            sortMethods(methods);
+
+            for (Method method : methods) {
+
+                appendMethod(
+                        log,
+                        method
+                );
+            }
+
+            log.append(
+                    "\nFields:\n"
+            );
+
+            appendFields(
+                    log,
+                    type
+            );
+
+            log.append(
+                    "\nSIGNING_PROVIDER_FOUND: true\n"
+            );
+
+        } catch (Throwable error) {
+
+            appendSectionError(
+                    log,
+                    "SigningConfigurationProvider",
+                    error
+            );
+        }
+    }
+
+    private static void inspectBuildModes(
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- APK build modes ---\n"
+        );
+
+        try {
+
+            Class<?> modeClass =
+                    Class.forName(
+                            "com.android.tools.build."
+                                    + "bundletool.commands."
+                                    + "BuildApksCommand$ApkBuildMode"
+                    );
+
+            Object[] values =
+                    modeClass.getEnumConstants();
+
+            if (values == null) {
+
+                log.append(
+                        "No enum constants\n"
+                );
+
+                return;
+            }
+
+            for (Object value : values) {
+
+                log.append("Mode: ")
+                        .append(value)
                         .append('\n');
             }
 
-            log.append("\n--- AAPT2 discovery ---\n");
+        } catch (Throwable error) {
+
+            appendSectionError(
+                    log,
+                    "ApkBuildMode",
+                    error
+            );
+        }
+    }
+
+    private static void inspectAapt2Executable(
+            Context context,
+            StringBuilder log
+    ) {
+
+        log.append(
+                "\n--- AAPT2 executable ---\n"
+        );
+
+        try {
 
             File nativeAapt2 = new File(
                     context.getApplicationInfo()
@@ -291,112 +754,82 @@ public final class CodeBoxApksBuilder {
                     "build-tools/aapt2"
             );
 
-            log.append("Native AAPT2: ")
-                    .append(nativeAapt2.getAbsolutePath())
-                    .append('\n');
-
-            log.append("Native exists: ")
-                    .append(nativeAapt2.isFile())
-                    .append('\n');
-
-            log.append("Native executable: ")
-                    .append(nativeAapt2.canExecute())
-                    .append('\n');
-
-            log.append("External AAPT2: ")
-                    .append(externalAapt2.getAbsolutePath())
-                    .append('\n');
-
-            log.append("External exists: ")
-                    .append(externalAapt2.isFile())
-                    .append('\n');
-
-            log.append("External executable: ")
-                    .append(externalAapt2.canExecute())
-                    .append('\n');
-
-            log.append("\n--- Result ---\n");
-
-            log.append(
-                    "Status: DIAGNOSTICS_COMPLETE\n"
+            appendFileInfo(
+                    log,
+                    "Native AAPT2",
+                    nativeAapt2
             );
 
-            log.append(
-                    "APKS generation not started.\n"
+            appendFileInfo(
+                    log,
+                    "External AAPT2",
+                    externalAapt2
             );
 
-            log.append(
-                    "The available bundletool API "
-                            + "has been inspected.\n"
-            );
+            File selected = null;
 
-            log.append(
-                    "The universal APK is not yet "
-                            + "generated or signed.\n"
-            );
+            if (nativeAapt2.isFile()
+                    && nativeAapt2.canExecute()) {
 
-            return new Result(
-                    false,
-                    null,
-                    null,
-                    log.toString()
-            );
+                selected = nativeAapt2;
+
+            } else if (externalAapt2.isFile()
+                    && externalAapt2.canExecute()) {
+
+                selected = externalAapt2;
+            }
+
+            if (selected != null) {
+
+                log.append(
+                        "Selected AAPT2: "
+                ).append(
+                        selected.getAbsolutePath()
+                ).append('\n');
+
+                log.append(
+                        "AAPT2_EXECUTABLE_FOUND: true\n"
+                );
+
+            } else {
+
+                log.append(
+                        "AAPT2_EXECUTABLE_FOUND: false\n"
+                );
+            }
 
         } catch (Throwable error) {
 
-            log.append("\n--- Error ---\n");
-
-            log.append(
-                    error.getClass().getName()
-            );
-
-            log.append(": ")
-                    .append(error.getMessage())
-                    .append('\n');
-
-            StringWriter writer =
-                    new StringWriter();
-
-            PrintWriter printer =
-                    new PrintWriter(writer);
-
-            error.printStackTrace(printer);
-            printer.flush();
-
-            log.append(writer.toString());
-
-            log.append(
-                    "\nStatus: FAILED\n"
-            );
-
-            return new Result(
-                    false,
-                    null,
-                    null,
-                    log.toString()
+            appendSectionError(
+                    log,
+                    "AAPT2 executable",
+                    error
             );
         }
     }
 
-    private static Class<?> findBuilderClass()
-            throws ClassNotFoundException {
-
-        return Class.forName(
-                "com.android.tools.build."
-                        + "bundletool.commands."
-                        + "BuildApksCommand$Builder"
-        );
-    }
-
     private static void appendClassInfo(
             StringBuilder log,
-            String label,
             Class<?> type
     ) {
 
-        log.append(label)
-                .append(": ")
+        log.append("Class: ")
                 .append(type.getName())
+                .append('\n');
+
+        log.append("Modifiers: ")
+                .append(
+                        Modifier.toString(
+                                type.getModifiers()
+                        )
+                ).append('\n');
+
+        log.append("Interface: ")
+                .append(type.isInterface())
+                .append('\n');
+
+        log.append("Enum: ")
+                .append(type.isEnum())
                 .append('\n');
 
         ClassLoader loader =
@@ -407,18 +840,184 @@ public final class CodeBoxApksBuilder {
                         loader == null
                                 ? "BOOT"
                                 : loader.getClass().getName()
-                )
-                .append('\n');
+                ).append('\n');
 
-        Package pkg = type.getPackage();
+        Class<?> parent =
+                type.getSuperclass();
 
-        if (pkg != null) {
+        log.append("Superclass: ")
+                .append(
+                        parent == null
+                                ? "none"
+                                : parent.getName()
+                ).append('\n');
 
-            log.append("Version: ")
+        Class<?>[] interfaces =
+                type.getInterfaces();
+
+        for (Class<?> item : interfaces) {
+
+            log.append("Implements: ")
+                    .append(item.getName())
+                    .append('\n');
+        }
+    }
+
+    private static void appendMethod(
+            StringBuilder log,
+            Method method
+    ) {
+
+        log.append(
+                method.toGenericString()
+        ).append('\n');
+
+        Type[] parameters =
+                method.getGenericParameterTypes();
+
+        for (int i = 0;
+                i < parameters.length;
+                i++) {
+
+            log.append("  Parameter ")
+                    .append(i)
+                    .append(": ")
                     .append(
-                            pkg.getImplementationVersion()
+                            parameters[i].getTypeName()
                     )
                     .append('\n');
         }
+
+        log.append("  Returns: ")
+                .append(
+                        method.getGenericReturnType()
+                                .getTypeName()
+                )
+                .append('\n');
+    }
+
+    private static void appendFields(
+            StringBuilder log,
+            Class<?> type
+    ) {
+
+        Field[] fields =
+                type.getDeclaredFields();
+
+        Arrays.sort(
+                fields,
+                Comparator.comparing(
+                        Field::getName
+                )
+        );
+
+        if (fields.length == 0) {
+
+            log.append(
+                    "No declared fields\n"
+            );
+
+            return;
+        }
+
+        for (Field field : fields) {
+
+            /*
+             * Print metadata only.
+             *
+             * Never read private field values
+             * or signing secrets.
+             */
+
+            log.append(
+                    field.toGenericString()
+            ).append('\n');
+        }
+    }
+
+    private static void appendFileInfo(
+            StringBuilder log,
+            String label,
+            File file
+    ) {
+
+        log.append(label)
+                .append(": ")
+                .append(file.getAbsolutePath())
+                .append('\n');
+
+        log.append("  Exists: ")
+                .append(file.isFile())
+                .append('\n');
+
+        log.append("  Executable: ")
+                .append(file.canExecute())
+                .append('\n');
+
+        if (file.isFile()) {
+
+            log.append("  Size: ")
+                    .append(file.length())
+                    .append(" bytes\n");
+        }
+    }
+
+    private static void sortMethods(
+            Method[] methods
+    ) {
+
+        Arrays.sort(
+                methods,
+                Comparator.comparing(
+                        Method::getName
+                ).thenComparing(
+                        Method::toGenericString
+                )
+        );
+    }
+
+    private static void appendSectionError(
+            StringBuilder log,
+            String section,
+            Throwable error
+    ) {
+
+        log.append(section)
+                .append(" diagnostic error: ")
+                .append(
+                        error.getClass().getName()
+                )
+                .append(": ")
+                .append(error.getMessage())
+                .append('\n');
+    }
+
+    private static void appendError(
+            StringBuilder log,
+            Throwable error
+    ) {
+
+        log.append(
+                error.getClass().getName()
+        ).append(": ")
+                .append(error.getMessage())
+                .append('\n');
+
+        StringWriter writer =
+                new StringWriter();
+
+        PrintWriter printer =
+                new PrintWriter(writer);
+
+        error.printStackTrace(printer);
+        printer.flush();
+
+        log.append(
+                "\n--- Stack trace ---\n"
+        );
+
+        log.append(
+                writer.toString()
+        );
     }
 }

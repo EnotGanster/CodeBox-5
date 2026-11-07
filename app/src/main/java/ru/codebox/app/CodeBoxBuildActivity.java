@@ -39,7 +39,10 @@ import java.util.Locale;
  * AAB:
  * AAPT2 -> ECJ -> D8 -> base module ->
  * bundletool -> CMS/JAR signer ->
- * signature verification -> AAB validation.
+ * signature verification -> AAB validation ->
+ * APKS API diagnostics.
+ *
+ * APKS diagnostics do not modify the final AAB.
  */
 public final class CodeBoxBuildActivity extends Activity {
 
@@ -373,6 +376,8 @@ public final class CodeBoxBuildActivity extends Activity {
                             + "Проверим JAR-подпись и "
                             + "структуру подписанного AAB "
                             + "через bundletool.\n\n"
+                            + "После проверки запустим "
+                            + "диагностику API build-apks.\n\n"
                             + "Это тестовый ключ, "
                             + "не предназначенный "
                             + "для публикации.";
@@ -995,8 +1000,9 @@ public final class CodeBoxBuildActivity extends Activity {
     }
 
     /**
-     * AAB pipeline with CMS/JAR signing
-     * and bundletool structure validation.
+     * AAB pipeline with CMS/JAR signing,
+     * bundletool structure validation,
+     * and non-blocking APKS API diagnostics.
      */
     private void buildSignedAab(
             File linkedResources,
@@ -1068,8 +1074,6 @@ public final class CodeBoxBuildActivity extends Activity {
                         + " байт"
         );
 
-        // AAB signing.
-
         manager.setStage(
                 "Подпись AAB (CMS/PKCS#7)"
         );
@@ -1121,10 +1125,6 @@ public final class CodeBoxBuildActivity extends Activity {
                         + " байт"
         );
 
-        // -------------------------------------
-        // NEW: Validate signed AAB with bundletool.
-        // -------------------------------------
-
         manager.setStage(
                 "Проверка подписанного AAB (bundletool)"
         );
@@ -1162,7 +1162,76 @@ public final class CodeBoxBuildActivity extends Activity {
                         + "проверка совместимости."
         );
 
+        // New diagnostic stage.
+        // The result of this inspection must not
+        // change the successful AAB build.
+
+        diagnoseApksBuilder(signed.aabFile);
+
         manager.succeed(signed.aabFile);
+    }
+
+    /**
+     * NEW: Inspect the patched bundletool
+     * BuildApksCommand API on Android.
+     *
+     * The current CodeBoxApksBuilder is
+     * diagnostic-only and returns built=false.
+     *
+     * This is expected and must not cause
+     * an otherwise valid AAB build to fail.
+     */
+    private void diagnoseApksBuilder(File signedAab) {
+
+        try {
+
+            manager.info(
+                    "\n--- APKS Builder diagnostics ---"
+            );
+
+            manager.info(
+                    "Проверяем API BuildApksCommand "
+                            + "в Android runtime."
+            );
+
+            CodeBoxApksBuilder.Result result =
+                    CodeBoxApksBuilder.build(
+                            getApplicationContext(),
+                            signedAab,
+                            projectName
+                    );
+
+            if (result.report != null) {
+                manager.info(result.report);
+            }
+
+            manager.info(
+                    "APKS_DIAGNOSTICS: COMPLETED"
+            );
+
+            manager.info(
+                    "APKS_BUILT: " + result.built
+            );
+
+            manager.info(
+                    "Примечание: APKS_BUILT=false "
+                            + "ожидается для текущей "
+                            + "диагностической версии."
+            );
+
+        } catch (Throwable error) {
+
+            manager.warning(
+                    "Диагностика APKS недоступна: "
+                            + error.getClass().getName()
+                            + ": "
+                            + error.getMessage()
+            );
+
+            manager.info(
+                    "Рабочая сборка AAB сохраняется."
+            );
+        }
     }
 
     private static final class ClassScan {

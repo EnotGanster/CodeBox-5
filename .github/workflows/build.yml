@@ -27,7 +27,7 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Verify existing patched bundletool
+      - name: Verify current bundletool
         shell: bash
         run: |
           set -euo pipefail
@@ -35,34 +35,47 @@ jobs:
           mkdir -p diagnostics
 
           OLD="app/libs/bundletool-patched-1.18.2.jar"
-          PATCH="app/libs/enummapper-candidate.jar"
+          ENUM="app/libs/enummapper-candidate.jar"
 
           test -s "$OLD"
-          test -s "$PATCH"
+          test -s "$ENUM"
 
           unzip -t "$OLD" > diagnostics/old-jar-test.txt
-          unzip -t "$PATCH" > diagnostics/enum-jar-test.txt
+          unzip -t "$ENUM" > diagnostics/enum-jar-test.txt
 
           CLASS="com/android/tools/build/bundletool/model/utils/EnumMapper.class"
 
-          OLD_SHA=$(
+          SHA1=$(
             unzip -p "$OLD" "$CLASS" |
-              sha256sum | cut -d ' ' -f 1
+            sha256sum | cut -d ' ' -f 1
           )
 
-          PATCH_SHA=$(
-            unzip -p "$PATCH" "$CLASS" |
-              sha256sum | cut -d ' ' -f 1
+          SHA2=$(
+            unzip -p "$ENUM" "$CLASS" |
+            sha256sum | cut -d ' ' -f 1
           )
 
-          echo "Existing EnumMapper: $OLD_SHA"
-          echo "Candidate EnumMapper: $PATCH_SHA"
+          echo "EnumMapper in bundletool: $SHA1"
+          echo "EnumMapper candidate: $SHA2"
 
-          test "$OLD_SHA" = "$PATCH_SHA"
+          test "$SHA1" = "$SHA2"
 
-          echo "Existing EnumMapper patch verified."
+          echo "First patch preserved."
 
-      - name: Prepare compilation classpath
+          javap -classpath "$OLD" -c -p \
+            com.android.tools.build.bundletool.model.utils.BundleModuleParser \
+            > diagnostics/current-parser-bytecode.txt
+
+          if grep -Fq \
+            'com/google/common/base/Predicates.not' \
+            diagnostics/current-parser-bytecode.txt; then
+            echo "ERROR: Second patch is missing."
+            exit 1
+          fi
+
+          echo "Second patch preserved."
+
+      - name: Prepare Java compilation classpath
         shell: bash
         run: |
           set -euo pipefail
@@ -75,7 +88,7 @@ jobs:
                   if (project.path == ':app') {
                       project.tasks.register('exportPatchClasspath') {
                           doLast {
-                              def configuration =
+                              def config =
                                   project.configurations.getByName(
                                       'debugRuntimeClasspath'
                                   )
@@ -85,16 +98,12 @@ jobs:
                                   'diagnostics/patch-classpath.txt'
                               )
 
-                              def files = configuration.files
+                              output.text = config.files
                                   .findAll { it.isFile() }
-
-                              output.text = files
                                   .collect { it.absolutePath }
                                   .join(File.pathSeparator)
 
-                              println(
-                                  'PATCH_CLASSPATH_FILES=' + files.size()
-                              )
+                              println('PATCH_CLASSPATH_READY')
                           }
                       }
                   }
@@ -108,9 +117,7 @@ jobs:
 
           test -s diagnostics/patch-classpath.txt
 
-          echo "Classpath prepared."
-
-      - name: Download official BundleModuleParser source
+      - name: Download official XML parser source
         shell: bash
         run: |
           set -euo pipefail
@@ -118,9 +125,9 @@ jobs:
           mkdir -p patch-work/source
           mkdir -p diagnostics
 
-          SOURCE="patch-work/source/BundleModuleParser.java"
+          SOURCE="patch-work/source/XmlProtoElementOrBuilder.java"
 
-          URL="https://raw.githubusercontent.com/google/bundletool/1.18.2/src/main/java/com/android/tools/build/bundletool/model/utils/BundleModuleParser.java"
+          URL="https://raw.githubusercontent.com/google/bundletool/1.18.2/src/main/java/com/android/tools/build/bundletool/model/utils/xmlproto/XmlProtoElementOrBuilder.java"
 
           curl --fail --location \
             --retry 3 \
@@ -131,71 +138,60 @@ jobs:
           test -s "$SOURCE"
 
           grep -Fq \
-            'class BundleModuleParser' \
+            'class XmlProtoElementOrBuilder' \
             "$SOURCE"
 
           cp "$SOURCE" \
-            diagnostics/original-BundleModuleParser.java
+            diagnostics/original-XmlProtoElementOrBuilder.java
 
-          sha256sum "$SOURCE" |
-            tee diagnostics/original-parser-sha256.txt
+          sha256sum "$SOURCE" \
+            | tee diagnostics/original-xml-source-sha256.txt
 
-          echo "Official source downloaded."
-
-      - name: Patch BundleModuleParser
+      - name: Apply third patch
         shell: bash
         run: |
           set -euo pipefail
 
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path(
-              "patch-work/source/BundleModuleParser.java"
+              "patch-work/source/XmlProtoElementOrBuilder.java"
           )
 
           source = path.read_text(encoding="utf-8")
 
-          pattern = (
-              r'\.filter\s*\(\s*'
-              r'not\s*\(\s*ZipEntry::isDirectory\s*\)'
-              r'\s*\)'
-          )
+          old = ".filter(predicate);"
+          new = ".filter(predicate::apply);"
 
-          replacement = (
-              '.filter(entry -> !entry.isDirectory())'
-          )
+          count = source.count(old)
 
-          patched, count = re.subn(
-              pattern,
-              replacement,
-              source
-          )
+          print("MATCHES=" + str(count))
 
           if count != 1:
               raise SystemExit(
-                  "ERROR: Expected exactly one filter, found "
+                  "ERROR: Expected one predicate call, found "
                   + str(count)
               )
+
+          patched = source.replace(old, new, 1)
 
           path.write_text(
               patched,
               encoding="utf-8"
           )
 
-          print("PATCH_REPLACEMENTS=" + str(count))
-          print("BundleModuleParser patch applied.")
+          print("THIRD_PATCH_APPLIED")
           PY
 
-          cp patch-work/source/BundleModuleParser.java \
-            diagnostics/patched-BundleModuleParser.java
+          cp patch-work/source/XmlProtoElementOrBuilder.java \
+            diagnostics/patched-XmlProtoElementOrBuilder.java
 
           grep -F \
-            '.filter(entry -> !entry.isDirectory())' \
-            patch-work/source/BundleModuleParser.java
+            '.filter(predicate::apply);' \
+            patch-work/source/XmlProtoElementOrBuilder.java
 
-      - name: Compile patched BundleModuleParser
+      - name: Compile third patch
         shell: bash
         run: |
           set -euo pipefail
@@ -214,16 +210,16 @@ jobs:
             -proc:none \
             -classpath "$CP" \
             -d patch-work/classes \
-            patch-work/source/BundleModuleParser.java \
-            2>&1 | tee diagnostics/parser-javac.txt
+            patch-work/source/XmlProtoElementOrBuilder.java \
+            2>&1 | tee diagnostics/xml-javac.txt
 
-          CLASS="com/android/tools/build/bundletool/model/utils/BundleModuleParser.class"
+          CLASS="com/android/tools/build/bundletool/model/utils/xmlproto/XmlProtoElementOrBuilder.class"
 
           test -s "patch-work/classes/$CLASS"
 
-          echo "BundleModuleParser compiled."
+          echo "Third patch compiled."
 
-      - name: Create second patched bundletool JAR
+      - name: Create patched bundletool v3
         shell: bash
         run: |
           set -euo pipefail
@@ -239,21 +235,20 @@ jobs:
             cd patch-work/classes
 
             jar uf "../../$NEW" \
-              com/android/tools/build/bundletool/model/utils/BundleModuleParser.class
+              com/android/tools/build/bundletool/model/utils/xmlproto/XmlProtoElementOrBuilder.class
           )
 
           test -s "$NEW"
 
-          unzip -t "$NEW" | tail -n 2
+          unzip -t "$NEW" \
+            | tail -n 2
 
-          echo "Second patched JAR created."
+          echo "Patched bundletool v3 created."
 
-      - name: Verify both patches
+      - name: Verify all three patches
         shell: bash
         run: |
           set -euo pipefail
-
-          mkdir -p diagnostics
 
           OLD="app/libs/bundletool-patched-1.18.2.jar"
           NEW="patched-output/bundletool-patched-1.18.2.jar"
@@ -262,119 +257,92 @@ jobs:
 
           PARSER="com/android/tools/build/bundletool/model/utils/BundleModuleParser.class"
 
-          echo "=== Verify EnumMapper unchanged ==="
+          XML="com/android/tools/build/bundletool/model/utils/xmlproto/XmlProtoElementOrBuilder.class"
 
-          OLD_ENUM_SHA=$(
+          echo "=== Verify first patch ==="
+
+          OLD_SHA=$(
             unzip -p "$OLD" "$ENUM" |
-              sha256sum | cut -d ' ' -f 1
+            sha256sum | cut -d ' ' -f 1
           )
 
-          NEW_ENUM_SHA=$(
+          NEW_SHA=$(
             unzip -p "$NEW" "$ENUM" |
-              sha256sum | cut -d ' ' -f 1
+            sha256sum | cut -d ' ' -f 1
           )
 
-          echo "OLD_ENUM_SHA=$OLD_ENUM_SHA"
-          echo "NEW_ENUM_SHA=$NEW_ENUM_SHA"
-
-          test "$OLD_ENUM_SHA" = "$NEW_ENUM_SHA"
+          test "$OLD_SHA" = "$NEW_SHA"
 
           echo "EnumMapper preserved."
 
-          echo "=== Verify BundleModuleParser replacement ==="
+          echo "=== Verify second patch ==="
 
-          OLD_PARSER_SHA=$(
+          OLD_SHA=$(
             unzip -p "$OLD" "$PARSER" |
-              sha256sum | cut -d ' ' -f 1
+            sha256sum | cut -d ' ' -f 1
           )
 
-          NEW_PARSER_SHA=$(
+          NEW_SHA=$(
             unzip -p "$NEW" "$PARSER" |
-              sha256sum | cut -d ' ' -f 1
+            sha256sum | cut -d ' ' -f 1
           )
 
-          echo "OLD_PARSER_SHA=$OLD_PARSER_SHA"
-          echo "NEW_PARSER_SHA=$NEW_PARSER_SHA"
+          test "$OLD_SHA" = "$NEW_SHA"
 
-          if [ "$OLD_PARSER_SHA" = "$NEW_PARSER_SHA" ]; then
-            echo "WARNING: Parser checksums are identical."
-            echo "Inspecting actual bytecode."
-          else
-            echo "BundleModuleParser class changed."
-          fi
+          echo "BundleModuleParser preserved."
 
-          echo "=== Inspect old parser ==="
+          echo "=== Verify third patch ==="
 
-          javap -classpath "$OLD" \
-            -c -p \
-            com.android.tools.build.bundletool.model.utils.BundleModuleParser \
-            | tee diagnostics/old-parser-bytecode.txt
+          OLD_SHA=$(
+            unzip -p "$OLD" "$XML" |
+            sha256sum | cut -d ' ' -f 1
+          )
 
-          echo "=== Inspect new parser ==="
+          NEW_SHA=$(
+            unzip -p "$NEW" "$XML" |
+            sha256sum | cut -d ' ' -f 1
+          )
 
-          javap -classpath "$NEW" \
-            -c -p \
-            com.android.tools.build.bundletool.model.utils.BundleModuleParser \
-            | tee diagnostics/new-parser-bytecode.txt
+          echo "OLD_XML_SHA=$OLD_SHA"
+          echo "NEW_XML_SHA=$NEW_SHA"
 
-          echo "=== Verify incompatible predicate removed ==="
-
-          if grep -Fq \
-            'com/google/common/base/Predicates.not' \
-            diagnostics/new-parser-bytecode.txt; then
-
-            echo "ERROR: Incompatible Predicates.not remains."
-            exit 1
-          fi
-
-          grep -Fq \
-            'java/util/stream/Stream.filter' \
-            diagnostics/new-parser-bytecode.txt
-
-          echo "BundleModuleParser bytecode verified."
-
-          echo "=== Verify EnumMapper bytecode ==="
+          test "$OLD_SHA" != "$NEW_SHA"
 
           javap -classpath "$NEW" \
             -c -p \
-            com.android.tools.build.bundletool.model.utils.EnumMapper \
-            | tee diagnostics/new-enummapper-bytecode.txt
+            com.android.tools.build.bundletool.model.utils.xmlproto.XmlProtoElementOrBuilder \
+            | tee diagnostics/new-xml-bytecode.txt
 
-          if grep -Fq \
-            'com/google/common/base/Predicates.not' \
-            diagnostics/new-enummapper-bytecode.txt; then
+          echo "=== Verify stream predicate adapter ==="
 
-            echo "ERROR: EnumMapper regression."
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
 
-          echo "=== Verify JAR integrity ==="
+          code = Path(
+              "diagnostics/new-xml-bytecode.txt"
+          ).read_text()
 
-          unzip -t "$NEW" |
-            tail -n 2
+          if "java/util/stream/Stream.filter" not in code:
+              raise SystemExit(
+                  "ERROR: Stream.filter missing."
+              )
 
-          echo "=== Checksums ==="
+          if "lambda$getChildrenElements$" not in code:
+              raise SystemExit(
+                  "ERROR: Expected lambda adapter missing."
+              )
 
-          sha256sum "$OLD" "$NEW" |
-            tee diagnostics/bundletool-checksums.txt
+          print("XML_PREDICATE_ADAPTER_VERIFIED")
+          PY
 
-          echo "Both patches verified."
+          echo "=== Verify JAR ==="
 
-      - name: Diagnose dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
+          unzip -t "$NEW" | tail -n 2
 
-          gradle --no-daemon \
-            :app:dependencyInsight \
-            --configuration debugRuntimeClasspath \
-            --dependency com.google.guava:guava \
-            | tee diagnostics/guava-dependency-insight.txt
+          sha256sum "$OLD" "$NEW" \
+            | tee diagnostics/bundletool-v3-checksums.txt
 
-          gradle --no-daemon \
-            :app:dependencies \
-            --configuration debugRuntimeClasspath \
-            | tee diagnostics/debug-runtime-dependencies.txt
+          echo "All three patches verified."
 
       - name: Build Debug APK
         shell: bash
@@ -387,6 +355,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          mkdir -p diagnostics
 
           APK=$(find app/build/outputs/apk/debug \
             -maxdepth 1 \
@@ -401,8 +371,8 @@ jobs:
             | grep -E '^classes[0-9]*\.dex$' \
             | tee diagnostics/apk-dex-files.txt
 
-          sha256sum "$APK" |
-            tee diagnostics/apk-sha256.txt
+          sha256sum "$APK" \
+            | tee diagnostics/apk-sha256.txt
 
       - name: Prepare Android API 35
         shell: bash
@@ -455,20 +425,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload patched bundletool v2
+      - name: Upload patched bundletool v3
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: CodeBox-5-Patched-Bundletool-v2
+          name: CodeBox-5-Patched-Bundletool-v3
           path: patched-output/bundletool-patched-1.18.2.jar
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload patch diagnostics
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: CodeBox-5-Patch-Diagnostics
+          name: CodeBox-5-Patch-Diagnostics-v3
           path: diagnostics/
           if-no-files-found: warn
           retention-days: 30

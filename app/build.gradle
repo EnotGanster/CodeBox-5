@@ -33,6 +33,18 @@ android {
     }
 }
 
+// --------------------------------------------------
+// CodeBox 5 — bundletool с исправленным EnumMapper
+// --------------------------------------------------
+
+// Получаем зависимости оригинального bundletool,
+// но не включаем его собственный JAR в APK.
+configurations {
+    bundletoolDependencies {
+        transitive = true
+    }
+}
+
 dependencies {
     // Локальный Java-компилятор.
     implementation 'org.eclipse.jdt:ecj:3.18.0'
@@ -43,13 +55,73 @@ dependencies {
     // Подпись APK.
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // Создание Android App Bundle.
-    implementation 'com.android.tools.build:bundletool:1.18.2'
+    // Исправленный bundletool 1.18.2.
+    // Внутри уже заменён EnumMapper.class.
+    implementation files(
+        'libs/bundletool-patched-1.18.2.jar'
+    )
+
+    // Только для получения списка зависимостей.
+    bundletoolDependencies(
+        'com.android.tools.build:bundletool:1.18.2'
+    )
 
     // Protocol Buffers.
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
-    // Guava. Пока используем стандартный выбор
-    // варианта для Android.
+    // Guava.
     implementation 'com.google.guava:guava:33.3.1-jre'
+}
+
+// --------------------------------------------------
+// Перенос транзитивных зависимостей bundletool
+// --------------------------------------------------
+
+def bundletoolDependencyArtifacts =
+    configurations.bundletoolDependencies
+        .incoming
+        .resolutionResult
+
+def bundletoolComponentId =
+    'com.android.tools.build:bundletool:1.18.2'
+
+// Используем метаданные Gradle, чтобы добавить
+// прямые зависимости bundletool в implementation.
+// Сам оригинальный bundletool не добавляем.
+afterEvaluate {
+    def rootComponent =
+        bundletoolDependencyArtifacts.root
+
+    rootComponent.dependencies.each { dependency ->
+        if (dependency instanceof
+                org.gradle.api.artifacts.result.ResolvedDependencyResult) {
+
+            def selected = dependency.selected
+
+            if (selected.moduleVersion != null &&
+                    selected.moduleVersion.group ==
+                    'com.android.tools.build' &&
+                    selected.moduleVersion.name == 'bundletool') {
+
+                selected.dependencies.each { child ->
+                    if (child instanceof
+                            org.gradle.api.artifacts.result.ResolvedDependencyResult) {
+
+                        def module = child.selected.moduleVersion
+
+                        if (module != null &&
+                                !(module.group ==
+                                    'com.android.tools.build' &&
+                                    module.name == 'bundletool')) {
+
+                            dependencies.add(
+                                'implementation',
+                                "${module.group}:${module.name}:${module.version}"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

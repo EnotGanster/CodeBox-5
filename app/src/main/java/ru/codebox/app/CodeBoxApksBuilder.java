@@ -1,38 +1,34 @@
+
 package ru.codebox.app;
 
 import android.content.Context;
 import android.os.Build;
 
 import com.android.tools.build.bundletool.commands.BuildApksCommand;
-import com.android.tools.build.bundletool.commands.BuildApksCommand.ApkBuildMode;
-import com.android.tools.build.bundletool.model.utils.Aapt2Command;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.Enumeration;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.Comparator;
 
 /**
  * CodeBox 5 - APKS Builder.
  *
- * Generates a universal APK set from an AAB
- * using bundletool.
+ * Diagnostic version for the patched
+ * bundletool 1.18.2 runtime.
  *
- * The extracted APK is an intermediate artifact.
- * It must be signed with the persistent CodeBox
- * APK signing key before being distributed.
+ * Inspects the available BuildApksCommand API
+ * without guessing unavailable classes.
+ *
+ * Does not modify the existing AAB pipeline.
  */
 public final class CodeBoxApksBuilder {
 
     private static final long MAX_AAB_BYTES =
-            512L * 1024L * 1024L;
-
-    private static final long MAX_APK_BYTES =
             512L * 1024L * 1024L;
 
     private CodeBoxApksBuilder() {
@@ -69,9 +65,6 @@ public final class CodeBoxApksBuilder {
         log.append("CodeBox 5 - APKS Builder\n");
         log.append("========================\n");
 
-        File output = null;
-        File extractedApk = null;
-
         try {
 
             if (context == null) {
@@ -90,7 +83,6 @@ public final class CodeBoxApksBuilder {
                     || !projectName.matches(
                             "[A-Za-z][A-Za-z0-9_]{0,49}"
                     )) {
-
                 throw new IOException(
                         "Недопустимое имя проекта"
                 );
@@ -99,7 +91,6 @@ public final class CodeBoxApksBuilder {
             if (aabFile == null
                     || !aabFile.isFile()
                     || aabFile.length() == 0) {
-
                 throw new IOException(
                         "Исходный AAB отсутствует"
                 );
@@ -111,46 +102,18 @@ public final class CodeBoxApksBuilder {
                 );
             }
 
-            File outputDir = new File(
-                    context.getCacheDir(),
-                    "apks-output-" + projectName
-            );
+            log.append("\n--- Device ---\n");
 
-            if (!outputDir.isDirectory()
-                    && !outputDir.mkdirs()) {
-
-                throw new IOException(
-                        "Не удалось создать каталог APKS"
-                );
-            }
-
-            output = new File(
-                    outputDir,
-                    projectName + ".apks"
-            );
-
-            extractedApk = new File(
-                    outputDir,
-                    projectName + "-universal-intermediate.apk"
-            );
-
-            if (output.exists()
-                    && !output.delete()) {
-
-                throw new IOException(
-                        "Не удалось удалить прежний APKS"
-                );
-            }
-
-            if (extractedApk.exists()
-                    && !extractedApk.delete()) {
-
-                throw new IOException(
-                        "Не удалось удалить прежний APK"
-                );
-            }
+            log.append("Android API: ")
+                    .append(Build.VERSION.SDK_INT)
+                    .append('\n');
 
             log.append("\n--- Input ---\n");
+
+            log.append("Project: ")
+                    .append(projectName)
+                    .append('\n');
+
             log.append("AAB: ")
                     .append(aabFile.getAbsolutePath())
                     .append('\n');
@@ -159,7 +122,163 @@ public final class CodeBoxApksBuilder {
                     .append(aabFile.length())
                     .append(" bytes\n");
 
-            log.append("\n--- AAPT2 ---\n");
+            File outputDir = new File(
+                    context.getCacheDir(),
+                    "apks-output-" + projectName
+            );
+
+            if (!outputDir.isDirectory()
+                    && !outputDir.mkdirs()) {
+                throw new IOException(
+                        "Не удалось создать каталог APKS"
+                );
+            }
+
+            File output = new File(
+                    outputDir,
+                    projectName + ".apks"
+            );
+
+            log.append("Planned output: ")
+                    .append(output.getAbsolutePath())
+                    .append('\n');
+
+            log.append("\n--- Bundletool classes ---\n");
+
+            appendClassInfo(
+                    log,
+                    "BuildApksCommand",
+                    BuildApksCommand.class
+            );
+
+            Class<?> builderClass =
+                    findBuilderClass();
+
+            appendClassInfo(
+                    log,
+                    "BuildApksCommand.Builder",
+                    builderClass
+            );
+
+            log.append("\n--- Builder methods ---\n");
+
+            Method[] methods =
+                    builderClass.getMethods();
+
+            Arrays.sort(
+                    methods,
+                    Comparator.comparing(Method::getName)
+                            .thenComparing(Method::toString)
+            );
+
+            for (Method method : methods) {
+
+                String name = method.getName();
+
+                if (name.startsWith("set")
+                        || "build".equals(name)) {
+
+                    log.append(
+                            Modifier.toString(
+                                    method.getModifiers()
+                            )
+                    );
+
+                    log.append(' ');
+
+                    log.append(
+                            method.getReturnType().getName()
+                    );
+
+                    log.append(' ');
+                    log.append(name);
+                    log.append('(');
+
+                    Class<?>[] parameters =
+                            method.getParameterTypes();
+
+                    for (int i = 0;
+                            i < parameters.length;
+                            i++) {
+
+                        if (i > 0) {
+                            log.append(", ");
+                        }
+
+                        log.append(
+                                parameters[i].getName()
+                        );
+                    }
+
+                    log.append(")\n");
+                }
+            }
+
+            log.append("\n--- Signing methods ---\n");
+
+            int signingMethods = 0;
+
+            for (Method method : methods) {
+
+                String name =
+                        method.getName().toLowerCase();
+
+                if (name.contains("sign")
+                        || name.contains("key")
+                        || name.contains("password")
+                        || name.contains("aapt")) {
+
+                    log.append(method.toString())
+                            .append('\n');
+
+                    signingMethods++;
+                }
+            }
+
+            log.append("Matching methods: ")
+                    .append(signingMethods)
+                    .append('\n');
+
+            log.append("\n--- APK build modes ---\n");
+
+            try {
+
+                Class<?> modeClass =
+                        Class.forName(
+                                "com.android.tools.build."
+                                        + "bundletool.commands."
+                                        + "BuildApksCommand$ApkBuildMode"
+                        );
+
+                Object[] values =
+                        modeClass.getEnumConstants();
+
+                if (values != null) {
+
+                    for (Object value : values) {
+
+                        log.append("Mode: ")
+                                .append(value)
+                                .append('\n');
+                    }
+
+                } else {
+
+                    log.append(
+                            "ApkBuildMode is not an enum\n"
+                    );
+                }
+
+            } catch (Throwable error) {
+
+                log.append("Mode diagnostic: ")
+                        .append(error.getClass().getName())
+                        .append(": ")
+                        .append(error.getMessage())
+                        .append('\n');
+            }
+
+            log.append("\n--- AAPT2 discovery ---\n");
 
             File nativeAapt2 = new File(
                     context.getApplicationInfo()
@@ -172,250 +291,66 @@ public final class CodeBoxApksBuilder {
                     "build-tools/aapt2"
             );
 
-            File aapt2;
-
-            if (nativeAapt2.isFile()
-                    && nativeAapt2.canExecute()) {
-
-                aapt2 = nativeAapt2;
-
-            } else if (externalAapt2.isFile()
-                    && externalAapt2.canExecute()) {
-
-                aapt2 = externalAapt2;
-
-            } else {
-
-                throw new IOException(
-                        "Исполняемый AAPT2 не найден"
-                );
-            }
-
-            log.append("AAPT2: ")
-                    .append(aapt2.getAbsolutePath())
+            log.append("Native AAPT2: ")
+                    .append(nativeAapt2.getAbsolutePath())
                     .append('\n');
 
-            log.append("\n--- Bundletool build-apks ---\n");
-
-            log.append("Mode: UNIVERSAL\n");
-            log.append("Output: ")
-                    .append(output.getAbsolutePath())
+            log.append("Native exists: ")
+                    .append(nativeAapt2.isFile())
                     .append('\n');
 
-            /*
-             * Without an explicit signing configuration,
-             * bundletool may use its debug signing key.
-             *
-             * Therefore, the generated APK is NOT
-             * considered the final signed application.
-             */
-
-            BuildApksCommand command =
-                    BuildApksCommand.builder()
-                            .setBundlePath(
-                                    aabFile.toPath()
-                            )
-                            .setOutputFile(
-                                    output.toPath()
-                            )
-                            .setApkBuildMode(
-                                    ApkBuildMode.UNIVERSAL
-                            )
-                            .setAapt2Command(
-                                    Aapt2Command
-                                            .createFromExecutablePath(
-                                                    aapt2.toPath()
-                                            )
-                            )
-                            .setOverwriteOutput(true)
-                            .build();
-
-            log.append(
-                    "BuildApksCommand: создан\n"
-            );
-
-            command.execute();
-
-            log.append(
-                    "BuildApksCommand: выполнен\n"
-            );
-
-            if (!output.isFile()
-                    || output.length() == 0) {
-
-                throw new IOException(
-                        "Bundletool не создал APKS"
-                );
-            }
-
-            log.append("APKS_CREATED: OK\n");
-
-            log.append("APKS size: ")
-                    .append(output.length())
-                    .append(" bytes\n");
-
-            log.append("\n--- APKS validation ---\n");
-
-            try (ZipFile zip = new ZipFile(output)) {
-
-                ZipEntry universal =
-                        zip.getEntry("universal.apk");
-
-                if (universal == null
-                        || universal.isDirectory()) {
-
-                    throw new IOException(
-                            "В APKS отсутствует universal.apk"
-                    );
-                }
-
-                log.append(
-                        "universal.apk: FOUND\n"
-                );
-
-                Enumeration<? extends ZipEntry> entries =
-                        zip.entries();
-
-                int count = 0;
-
-                while (entries.hasMoreElements()) {
-
-                    ZipEntry entry = entries.nextElement();
-
-                    log.append("Entry: ")
-                            .append(entry.getName())
-                            .append('\n');
-
-                    count++;
-                }
-
-                log.append("ZIP entries: ")
-                        .append(count)
-                        .append('\n');
-
-                try (
-                        InputStream input =
-                                zip.getInputStream(universal);
-
-                        FileOutputStream fileOutput =
-                                new FileOutputStream(extractedApk)
-                ) {
-
-                    byte[] buffer = new byte[8192];
-
-                    int read;
-                    long total = 0;
-
-                    while ((read = input.read(buffer)) != -1) {
-
-                        total += read;
-
-                        if (total > MAX_APK_BYTES) {
-                            throw new IOException(
-                                    "Universal APK слишком большой"
-                            );
-                        }
-
-                        fileOutput.write(
-                                buffer,
-                                0,
-                                read
-                        );
-                    }
-
-                    fileOutput.flush();
-                    fileOutput.getFD().sync();
-                }
-            }
-
-            if (!extractedApk.isFile()
-                    || extractedApk.length() == 0) {
-
-                throw new IOException(
-                        "Не удалось извлечь universal.apk"
-                );
-            }
-
-            try (ZipFile apkZip =
-                         new ZipFile(extractedApk)) {
-
-                ZipEntry manifest =
-                        apkZip.getEntry(
-                                "AndroidManifest.xml"
-                        );
-
-                ZipEntry dex =
-                        apkZip.getEntry(
-                                "classes.dex"
-                        );
-
-                if (manifest == null
-                        || manifest.isDirectory()) {
-
-                    throw new IOException(
-                            "В universal.apk отсутствует "
-                                    + "AndroidManifest.xml"
-                    );
-                }
-
-                if (dex == null
-                        || dex.isDirectory()) {
-
-                    throw new IOException(
-                            "В universal.apk отсутствует "
-                                    + "classes.dex"
-                    );
-                }
-            }
-
-            log.append(
-                    "UNIVERSAL_APK_EXTRACTED: OK\n"
-            );
-
-            log.append("APK: ")
-                    .append(extractedApk.getAbsolutePath())
+            log.append("Native executable: ")
+                    .append(nativeAapt2.canExecute())
                     .append('\n');
 
-            log.append("APK size: ")
-                    .append(extractedApk.length())
-                    .append(" bytes\n");
+            log.append("External AAPT2: ")
+                    .append(externalAapt2.getAbsolutePath())
+                    .append('\n');
+
+            log.append("External exists: ")
+                    .append(externalAapt2.isFile())
+                    .append('\n');
+
+            log.append("External executable: ")
+                    .append(externalAapt2.canExecute())
+                    .append('\n');
+
+            log.append("\n--- Result ---\n");
 
             log.append(
-                    "\n--- Result ---\n"
+                    "Status: DIAGNOSTICS_COMPLETE\n"
             );
 
             log.append(
-                    "Status: APKS_CREATED\n"
+                    "APKS generation not started.\n"
             );
 
             log.append(
-                    "Внимание: universal.apk является "
-                            + "промежуточным результатом.\n"
+                    "The available bundletool API "
+                            + "has been inspected.\n"
             );
 
             log.append(
-                    "Перед установкой необходимо "
-                            + "подписать его постоянным "
-                            + "ключом CodeBox и проверить "
-                            + "результат через ApkVerifier.\n"
+                    "The universal APK is not yet "
+                            + "generated or signed.\n"
             );
 
             return new Result(
-                    true,
-                    output,
-                    extractedApk,
+                    false,
+                    null,
+                    null,
                     log.toString()
             );
 
         } catch (Throwable error) {
 
-            log.append(
-                    "\n--- Error ---\n"
-            );
+            log.append("\n--- Error ---\n");
 
             log.append(
                     error.getClass().getName()
-            ).append(": ")
+            );
+
+            log.append(": ")
                     .append(error.getMessage())
                     .append('\n');
 
@@ -430,16 +365,6 @@ public final class CodeBoxApksBuilder {
 
             log.append(writer.toString());
 
-            if (output != null && output.exists()) {
-                output.delete();
-            }
-
-            if (extractedApk != null
-                    && extractedApk.exists()) {
-
-                extractedApk.delete();
-            }
-
             log.append(
                     "\nStatus: FAILED\n"
             );
@@ -450,6 +375,50 @@ public final class CodeBoxApksBuilder {
                     null,
                     log.toString()
             );
+        }
+    }
+
+    private static Class<?> findBuilderClass()
+            throws ClassNotFoundException {
+
+        return Class.forName(
+                "com.android.tools.build."
+                        + "bundletool.commands."
+                        + "BuildApksCommand$Builder"
+        );
+    }
+
+    private static void appendClassInfo(
+            StringBuilder log,
+            String label,
+            Class<?> type
+    ) {
+
+        log.append(label)
+                .append(": ")
+                .append(type.getName())
+                .append('\n');
+
+        ClassLoader loader =
+                type.getClassLoader();
+
+        log.append("ClassLoader: ")
+                .append(
+                        loader == null
+                                ? "BOOT"
+                                : loader.getClass().getName()
+                )
+                .append('\n');
+
+        Package pkg = type.getPackage();
+
+        if (pkg != null) {
+
+            log.append("Version: ")
+                    .append(
+                            pkg.getImplementationVersion()
+                    )
+                    .append('\n');
         }
     }
 }

@@ -2,6 +2,9 @@ package ru.codebox.app;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -12,8 +15,14 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputType;
+import android.text.Spannable;
+import android.text.SpannableStringBuilder;
+import android.text.Selection;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.view.Gravity;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -305,7 +314,7 @@ public final class CodeBoxBuildActivity extends Activity {
         );
 
         TextView heading = label(
-                "Подробный журнал",
+                "Журнал сборки",
                 17,
                 Color.WHITE,
                 true
@@ -313,36 +322,38 @@ public final class CodeBoxBuildActivity extends Activity {
 
         LinearLayout.LayoutParams hp =
                 new LinearLayout.LayoutParams(-1, -2);
-
         hp.topMargin = dp(15);
-        hp.bottomMargin = dp(8);
-
+        hp.bottomMargin = dp(6);
         root.addView(heading, hp);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackground(shape(panel, 12));
+        // Короткий предпросмотр вместо сжатого многострочного журнала.
+        ScrollView previewScroll = new ScrollView(this);
+        previewScroll.setFillViewport(false);
+        previewScroll.setBackground(shape(panel, 12));
 
-        root.addView(
-                scroll,
-                new LinearLayout.LayoutParams(-1, 0, 1)
-        );
+        LinearLayout.LayoutParams previewParams =
+                new LinearLayout.LayoutParams(-1, dp(76));
+        root.addView(previewScroll, previewParams);
 
         reportView = label(
                 "Журнал появится после проверки.",
-                12,
+                11,
                 muted,
                 false
         );
-
         reportView.setTypeface(Typeface.MONOSPACE);
         reportView.setTextIsSelectable(true);
+        reportView.setMaxLines(3);
+        reportView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        previewScroll.addView(reportView);
 
-        reportView.setPadding(
-                dp(12), dp(12), dp(12), dp(12)
+        addFullButton(
+                root,
+                "Открыть полный журнал",
+                Color.rgb(89, 69, 173),
+                this::openFullJournal,
+                8
         );
-
-        scroll.addView(reportView);
 
         addFullButton(
                 root,
@@ -2143,7 +2154,7 @@ public final class CodeBoxBuildActivity extends Activity {
                             : "Установка: завершена"
             );
 
-            reportView.setText(installationReport);
+            setReportPreview(installationReport);
 
             return;
         }
@@ -2160,7 +2171,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         if (state == CodeBoxBuildManager.State.IDLE) {
 
-            reportView.setText(
+            setReportPreview(
                     "CodeBox 5 готов к локальной сборке.\n\n"
                             + "Android SDK проверяется автоматически.\n"
                             + "Установленный android.jar хранится "
@@ -2171,8 +2182,217 @@ public final class CodeBoxBuildActivity extends Activity {
 
         } else {
 
-            reportView.setText(manager.getReport());
+            setReportPreview(manager.getReport());
         }
+    }
+
+    // ---------------------------------------------------------
+    // FULL-SCREEN BUILD JOURNAL
+    // ---------------------------------------------------------
+
+    private void setReportPreview(String report) {
+        if (reportView == null) return;
+        String value = report == null || report.trim().isEmpty()
+                ? "Журнал пока пуст." : report;
+        reportView.setText(colorizeReport(value));
+    }
+
+    private void openFullJournal() {
+        String report = currentReport();
+        if (report == null || report.trim().isEmpty()) {
+            report = "CodeBox 5 готов к локальной сборке.\n\n"
+                    + "Журнал появится после запуска сборки "
+                    + "или установки инструментов.";
+        }
+        final String fullReport = report;
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(14), dp(14), dp(14), dp(12));
+        page.setBackgroundColor(Color.rgb(17, 20, 35));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView title = label("Полный журнал сборки", 19, Color.WHITE, true);
+        header.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView close = actionButton("Закрыть", Color.rgb(65, 76, 102));
+        header.addView(close, new LinearLayout.LayoutParams(dp(88), dp(40)));
+        page.addView(header);
+
+        TextView hint = label(
+                "Ошибки — красным • предупреждения — жёлтым • успех — зелёным",
+                11, Color.rgb(185, 193, 215), false
+        );
+        LinearLayout.LayoutParams hintParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        hintParams.topMargin = dp(8);
+        hintParams.bottomMargin = dp(10);
+        page.addView(hint, hintParams);
+
+        LinearLayout firstActions = new LinearLayout(this);
+        firstActions.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView selectAll = actionButton(
+                "Выделить всё", Color.rgb(65, 76, 102));
+        TextView copySelected = actionButton(
+                "Копировать выделенное", Color.rgb(47, 93, 121));
+
+        LinearLayout.LayoutParams selectParams =
+                new LinearLayout.LayoutParams(0, dp(44), 1);
+        selectParams.rightMargin = dp(4);
+        firstActions.addView(selectAll, selectParams);
+
+        LinearLayout.LayoutParams copySelectedParams =
+                new LinearLayout.LayoutParams(0, dp(44), 1);
+        copySelectedParams.leftMargin = dp(4);
+        firstActions.addView(copySelected, copySelectedParams);
+        page.addView(firstActions);
+
+        TextView copyAll = actionButton(
+                "Копировать весь журнал", Color.rgb(47, 121, 113));
+        LinearLayout.LayoutParams copyAllParams =
+                new LinearLayout.LayoutParams(-1, dp(44));
+        copyAllParams.topMargin = dp(8);
+        copyAllParams.bottomMargin = dp(10);
+        page.addView(copyAll, copyAllParams);
+
+        ScrollView fullScroll = new ScrollView(this);
+        fullScroll.setFillViewport(true);
+        fullScroll.setBackground(shape(Color.rgb(29, 34, 53), 12));
+        page.addView(fullScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        TextView fullText = label("", 12, Color.rgb(205, 211, 226), false);
+        fullText.setTypeface(Typeface.MONOSPACE);
+        fullText.setTextIsSelectable(true);
+        fullText.setPadding(dp(12), dp(12), dp(12), dp(18));
+        fullText.setText(colorizeReport(fullReport));
+        fullScroll.addView(fullText);
+
+        close.setOnClickListener(v -> dialog.dismiss());
+
+        selectAll.setOnClickListener(v -> {
+            CharSequence text = fullText.getText();
+            if (text instanceof Spannable) {
+                Selection.selectAll((Spannable) text);
+                toast("Весь журнал выделен");
+            }
+        });
+
+        copySelected.setOnClickListener(v -> {
+            int start = Selection.getSelectionStart(fullText.getText());
+            int end = Selection.getSelectionEnd(fullText.getText());
+            if (start < 0 || end < 0 || start == end) {
+                toast("Сначала выделите текст в журнале");
+                return;
+            }
+            int from = Math.min(start, end);
+            int to = Math.max(start, end);
+            String selected = fullText.getText()
+                    .subSequence(from, to).toString();
+            copyToClipboard("CodeBox 5 — выделенный журнал", selected);
+        });
+
+        copyAll.setOnClickListener(v ->
+                copyToClipboard(
+                        "CodeBox 5 — полный журнал " + projectName,
+                        fullReport
+                )
+        );
+
+        dialog.setContentView(page);
+        dialog.setCancelable(true);
+        dialog.show();
+
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT
+            );
+        }
+    }
+
+    private void copyToClipboard(String label, String value) {
+        try {
+            ClipboardManager clipboard =
+                    (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                toast("Буфер обмена недоступен");
+                return;
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText(label, value));
+            toast("Скопировано в буфер обмена");
+        } catch (Exception e) {
+            toast("Не удалось скопировать: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Подсвечивает всю строку в зависимости от типа сообщения.
+     * Ошибки красные, предупреждения жёлтые, успешные этапы зелёные.
+     */
+    private CharSequence colorizeReport(String report) {
+        String source = report == null ? "" : report;
+        SpannableStringBuilder styled = new SpannableStringBuilder(source);
+
+        int errorColor = Color.rgb(255, 105, 105);
+        int warningColor = Color.rgb(255, 195, 95);
+        int successColor = Color.rgb(105, 220, 155);
+        int normalColor = Color.rgb(205, 211, 226);
+
+        int start = 0;
+        while (start < styled.length()) {
+            int newline = source.indexOf('\n', start);
+            int end = newline >= 0 ? newline : styled.length();
+
+            String line = styled.subSequence(start, end)
+                    .toString().toLowerCase(Locale.ROOT);
+
+            boolean warning = line.contains("[warn]")
+                    || line.contains("warning")
+                    || line.contains("предупреждение");
+
+            boolean error = line.contains("[error]")
+                    || line.contains(" fatal")
+                    || line.startsWith("error")
+                    || line.contains("failed")
+                    || line.contains("exception")
+                    || line.contains("caused by:")
+                    || line.contains("ошибка")
+                    || line.contains("сбой");
+
+            int color = normalColor;
+            if (error && !warning) {
+                color = errorColor;
+            } else if (warning) {
+                color = warningColor;
+            } else if (line.contains("[success]")
+                    || line.contains("succeeded")
+                    || line.contains("created: ok")
+                    || line.contains("verified: ok")
+                    || line.contains("успешно")
+                    || line.contains("завершена: ok")) {
+                color = successColor;
+            }
+
+            if (end > start) {
+                styled.setSpan(
+                        new ForegroundColorSpan(color),
+                        start, end,
+                        Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                );
+            }
+
+            start = newline >= 0 ? newline + 1 : styled.length();
+        }
+        return styled;
     }
 
     private String currentReport() {
@@ -2412,4 +2632,4 @@ public final class CodeBoxBuildActivity extends Activity {
                 Toast.LENGTH_LONG
         ).show();
     }
-}
+                        }

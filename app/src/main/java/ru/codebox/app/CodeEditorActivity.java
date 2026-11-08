@@ -3,6 +3,8 @@ package ru.codebox.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Typeface;
@@ -14,6 +16,7 @@ import android.text.Layout;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -54,9 +57,14 @@ public class CodeEditorActivity extends Activity {
     };
 
     private CodeEditText editor;
-    private TextView title, statusText, undoButton, redoButton;
+    private TextView title, statusText, undoButton, redoButton, orientationButton;
     private File currentFile;
+    private File projectDirectory;
+    private CodeBoxTabletExplorer tabletExplorer;
     private String savedContent = "";
+    private String initialEditorContent;
+    private int restoredCursorPosition = -1;
+    private int editorOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     private String currentProjectName = "";
     private EditorHistoryManager historyManager;
     private boolean internalEdit;
@@ -93,11 +101,20 @@ public class CodeEditorActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) {
+            editorOrientation = state.getInt("editor_orientation",
+                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            if (editorOrientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+                setRequestedOrientation(editorOrientation);
+            }
+            initialEditorContent = state.getString("editor_draft");
+            restoredCursorPosition = state.getInt("editor_cursor", -1);
+        }
         String projectName = getIntent().getStringExtra("project_name");
         String relativePath = getIntent().getStringExtra("file_path");
         if (projectName == null || !projectName.matches("[A-Za-z][A-Za-z0-9_]{0,49}")
                 || relativePath == null || relativePath.isEmpty()) {
-            showError("Неверные данные файла");
+            showError("袧械胁械褉薪褘械 写邪薪薪褘械 褎邪泄谢邪");
             return;
         }
         currentProjectName = projectName;
@@ -105,11 +122,12 @@ public class CodeEditorActivity extends Activity {
             File root = new File(getFilesDir(), "projects").getCanonicalFile();
             File project = new File(root, projectName).getCanonicalFile();
             if (!root.equals(project.getParentFile()) || !project.isDirectory()) {
-                throw new IOException("Проект не найден");
+                throw new IOException("袩褉芯械泻褌 薪械 薪邪泄写械薪");
             }
+            projectDirectory = project;
             File file = new File(project, relativePath).getCanonicalFile();
             if (!file.getPath().startsWith(project.getPath() + File.separator) || !file.isFile()) {
-                throw new IOException("Файл недоступен или вне проекта");
+                throw new IOException("肖邪泄谢 薪械写芯褋褌褍锌械薪 懈谢懈 胁薪械 锌褉芯械泻褌邪");
             }
             if (isImageFile(file)) {
                 Intent intent = new Intent(this, ImageViewerActivity.class);
@@ -119,12 +137,22 @@ public class CodeEditorActivity extends Activity {
                 finish();
                 return;
             }
-            if (file.length() > MAX_FILE_BYTES) throw new IOException("Файл больше 1 МБ");
-            if (isBinaryFile(file)) throw new IOException("Бинарный файл нельзя редактировать");
+            if (file.length() > MAX_FILE_BYTES) throw new IOException("肖邪泄谢 斜芯谢褜褕械 1 袦袘");
+            if (isBinaryFile(file)) throw new IOException("袘懈薪邪褉薪褘泄 褎邪泄谢 薪械谢褜蟹褟 褉械写邪泻褌懈褉芯胁邪褌褜");
             currentFile = file;
             savedContent = FileUtils.readText(file);
+            if (initialEditorContent == null) initialEditorContent = savedContent;
             buildEditor();
         } catch (IOException e) { showError(e.getMessage()); }
+    }
+
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        if (editor != null) {
+            outState.putString("editor_draft", editor.getText().toString());
+            outState.putInt("editor_cursor", editor.getSelectionStart());
+        }
+        outState.putInt("editor_orientation", editorOrientation);
+        super.onSaveInstanceState(outState);
     }
 
     private boolean isImageFile(File file) {
@@ -149,8 +177,46 @@ public class CodeEditorActivity extends Activity {
         createHeader(root);
         createActions(root);
         createSnippetButton(root);
-        createEditorArea(root);
-        createBottomToolbar(root);
+
+        if (isTabletLayout()) {
+            LinearLayout workspace = new LinearLayout(this);
+            workspace.setOrientation(LinearLayout.HORIZONTAL);
+            workspace.setGravity(Gravity.CENTER_VERTICAL);
+
+            tabletExplorer = new CodeBoxTabletExplorer(this, projectDirectory,
+                    currentProjectName, new CodeBoxTabletExplorer.Listener() {
+                @Override public void onFileSelected(File file) {
+                    openFileFromExplorer(file);
+                }
+                @Override public void onHome() { attemptExit(true); }
+                @Override public void onBack() { attemptExit(false); }
+                @Override public void onUp() {
+                    if (tabletExplorer != null) tabletExplorer.refresh();
+                    toast("袩芯泻邪蟹邪薪 泻芯褉械薪褜 锌褉芯械泻褌邪");
+                }
+                @Override public void onCreateFile() { showTabletCreateDialog(false); }
+                @Override public void onCreateFolder() { showTabletCreateDialog(true); }
+                @Override public void onGraphics() { openTabletGraphicsEditor(); }
+            });
+
+            View explorerView = tabletExplorer.createView();
+            LinearLayout.LayoutParams explorerParams =
+                    new LinearLayout.LayoutParams(dp(270), -1);
+            explorerParams.rightMargin = dp(1);
+            workspace.addView(explorerView, explorerParams);
+
+            LinearLayout editorColumn = new LinearLayout(this);
+            editorColumn.setOrientation(LinearLayout.VERTICAL);
+            createEditorArea(editorColumn);
+            createBottomToolbar(editorColumn);
+            workspace.addView(editorColumn,
+                    new LinearLayout.LayoutParams(0, -1, 1f));
+
+            root.addView(workspace, new LinearLayout.LayoutParams(-1, 0, 1f));
+        } else {
+            createEditorArea(root);
+            createBottomToolbar(root);
+        }
         setContentView(root);
         historyManager = new EditorHistoryManager(editor);
         editor.addTextChangedListener(new TextWatcher() {
@@ -204,16 +270,110 @@ public class CodeEditorActivity extends Activity {
         updateHistoryButtons();
     }
 
+    private boolean isTabletLayout() {
+        android.content.res.Configuration config = getResources().getConfiguration();
+        return config.smallestScreenWidthDp >= 600 || config.screenWidthDp >= 720;
+    }
+
+    private void openFileFromExplorer(File file) {
+        if (file == null || projectDirectory == null) return;
+        try {
+            File canonical = file.getCanonicalFile();
+            String rootPath = projectDirectory.getCanonicalPath();
+            if (!canonical.getPath().startsWith(rootPath + File.separator)
+                    || !canonical.isFile()) {
+                toast("肖邪泄谢 薪械写芯褋褌褍锌械薪 懈谢懈 薪邪褏芯写懈褌褋褟 胁薪械 锌褉芯械泻褌邪");
+                return;
+            }
+            if (canonical.equals(currentFile)) return;
+            if (hasUnsavedChanges()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("袧械褋芯褏褉邪薪褢薪薪褘械 懈蟹屑械薪械薪懈褟")
+                        .setMessage("小芯褏褉邪薪懈褌褜 褌械泻褍褖懈泄 褎邪泄谢 锌械褉械写 芯褌泻褉褘褌懈械屑 写褉褍谐芯谐芯?")
+                        .setPositiveButton("小芯褏褉邪薪懈褌褜", (d, w) -> {
+                            saveFile();
+                            if (!hasUnsavedChanges()) launchEditorFile(canonical);
+                        })
+                        .setNegativeButton("袨褌泻褉褘褌褜 斜械蟹 褋芯褏褉邪薪械薪懈褟",
+                                (d, w) -> launchEditorFile(canonical))
+                        .setNeutralButton("袨褌屑械薪邪", null)
+                        .show();
+            } else {
+                launchEditorFile(canonical);
+            }
+        } catch (IOException e) {
+            toast("袨褕懈斜泻邪 芯褌泻褉褘褌懈褟: " + e.getMessage());
+        }
+    }
+
+    private void launchEditorFile(File file) {
+        if (projectDirectory == null || file == null) return;
+        try {
+            String relative = file.getCanonicalPath().substring(
+                    projectDirectory.getCanonicalPath().length() + 1);
+            Intent intent = new Intent(this, CodeEditorActivity.class);
+            intent.putExtra("project_name", currentProjectName);
+            intent.putExtra("file_path", relative);
+            startActivity(intent);
+        } catch (IOException e) {
+            toast("袨褕懈斜泻邪 锌褍褌懈 褎邪泄谢邪: " + e.getMessage());
+        }
+    }
+
+    private void showTabletCreateDialog(boolean folder) {
+        if (projectDirectory == null) return;
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(folder ? "袧邪锌褉懈屑械褉: utils" : "袧邪锌褉懈屑械褉: Main.java");
+        LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setPadding(dp(24), dp(12), dp(24), dp(8));
+        wrapper.addView(input);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(folder ? "袧芯胁邪褟 锌邪锌泻邪 胁 锌褉芯械泻褌械" : "袧芯胁褘泄 褎邪泄谢 胁 锌褉芯械泻褌械")
+                .setView(wrapper)
+                .setPositiveButton("小芯蟹写邪褌褜", null)
+                .setNegativeButton("袨褌屑械薪邪", null)
+                .create();
+        dialog.setOnShowListener(ignored ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    String name = input.getText().toString().trim();
+                    try {
+                        ProjectFileManager manager = new ProjectFileManager(projectDirectory);
+                        if (folder) manager.createFolder(projectDirectory, name);
+                        else manager.createFile(projectDirectory, name, "");
+                        dialog.dismiss();
+                        if (tabletExplorer != null) tabletExplorer.refresh();
+                        toast(folder ? "袩邪锌泻邪 褋芯蟹写邪薪邪" : "肖邪泄谢 褋芯蟹写邪薪");
+                    } catch (IOException e) {
+                        input.setError(e.getMessage() == null
+                                ? "袧械 褍写邪谢芯褋褜 褋芯蟹写邪褌褜 芯斜褗械泻褌" : e.getMessage());
+                    }
+                }));
+        dialog.show();
+    }
+
+    private void openTabletGraphicsEditor() {
+        if (projectDirectory == null) return;
+        Intent intent = new Intent(this, GraphicsEditorActivity.class);
+        intent.putExtra("project_name", currentProjectName);
+        intent.putExtra("folder_path", "");
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            toast("袧械 褍写邪谢芯褋褜 芯褌泻褉褘褌褜 谐褉邪褎懈褔械褋泻懈泄 褉械写邪泻褌芯褉");
+        }
+    }
+
     private void createHeader(LinearLayout root) {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(10), dp(9), dp(10), dp(9));
         header.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{0xFF8657F5, 0xFF6535D5, 0xFF4522A3}));
-        TextView home = headerButton("⌂", "На главный экран");
+        TextView home = headerButton("鈱�", "袧邪 谐谢邪胁薪褘泄 褝泻褉邪薪");
         header.addView(home, new LinearLayout.LayoutParams(dp(38), dp(40)));
         home.setOnClickListener(v -> attemptExit(true));
-        TextView back = headerButton("‹", "Назад к файлам");
+        TextView back = headerButton("鈥�", "袧邪蟹邪写 泻 褎邪泄谢邪屑");
         LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(dp(38), dp(40));
         backParams.leftMargin = dp(5);
         header.addView(back, backParams);
@@ -226,14 +386,43 @@ public class CodeEditorActivity extends Activity {
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         labels.addView(title);
-        TextView subtitle = text(currentProjectName + " • Редактор", 10, false);
+        TextView subtitle = text(currentProjectName + " 鈥� 袪械写邪泻褌芯褉", 10, false);
         subtitle.setTextColor(0xFFE8DDFF);
         subtitle.setSingleLine(true);
         labels.addView(subtitle);
         header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView icon = headerButton("</>", "Редактор кода");
+        orientationButton = headerButton("鈫�", "袩械褉械泻谢褞褔懈褌褜 芯褉懈械薪褌邪褑懈褞 褝泻褉邪薪邪");
+        LinearLayout.LayoutParams orientationParams =
+                new LinearLayout.LayoutParams(dp(39), dp(40));
+        orientationParams.rightMargin = dp(5);
+        header.addView(orientationButton, orientationParams);
+        orientationButton.setOnClickListener(v -> toggleEditorOrientation());
+        updateOrientationButton();
+        TextView icon = headerButton("</>", "袪械写邪泻褌芯褉 泻芯写邪");
         header.addView(icon, new LinearLayout.LayoutParams(dp(39), dp(40)));
         root.addView(header);
+    }
+
+    private void toggleEditorOrientation() {
+        int current = getResources().getConfiguration().orientation;
+        if (current == Configuration.ORIENTATION_LANDSCAPE) {
+            editorOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT;
+        } else {
+            editorOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+        }
+        setRequestedOrientation(editorOrientation);
+        toast(editorOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                ? "袚芯褉懈蟹芯薪褌邪谢褜薪邪褟 芯褉懈械薪褌邪褑懈褟" : "袙械褉褌懈泻邪谢褜薪邪褟 芯褉懈械薪褌邪褑懈褟");
+    }
+
+    private void updateOrientationButton() {
+        if (orientationButton == null) return;
+        boolean landscape = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_LANDSCAPE;
+        orientationButton.setText(landscape ? "鈫�" : "鈫�");
+        orientationButton.setContentDescription(landscape
+                ? "袩械褉械泻谢褞褔懈褌褜 薪邪 胁械褉褌懈泻邪谢褜薪褍褞 芯褉懈械薪褌邪褑懈褞"
+                : "袩械褉械泻谢褞褔懈褌褜 薪邪 谐芯褉懈蟹芯薪褌邪谢褜薪褍褞 芯褉懈械薪褌邪褑懈褞");
     }
 
     private TextView headerButton(String label, String description) {
@@ -250,16 +439,16 @@ public class CodeEditorActivity extends Activity {
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(7), dp(6), dp(7), dp(6));
         toolbar.setBackgroundColor(CodeBoxTheme.surface(this));
-        undoButton = action("↶", toolbar, 1);
-        redoButton = action("↷", toolbar, 1);
-        TextView search = action("⌕", toolbar, 1);
-        search.setContentDescription("Поиск по файлу");
-        TextView go = action("№", toolbar, 1);
-        go.setContentDescription("Перейти к строке");
+        undoButton = action("鈫�", toolbar, 1);
+        redoButton = action("鈫�", toolbar, 1);
+        TextView search = action("鈱�", toolbar, 1);
+        search.setContentDescription("袩芯懈褋泻 锌芯 褎邪泄谢褍");
+        TextView go = action("鈩�", toolbar, 1);
+        go.setContentDescription("袩械褉械泄褌懈 泻 褋褌褉芯泻械");
         TextView complete = action("Java+", toolbar, 2);
-        complete.setContentDescription("Автодополнение Java");
-        TextView save = action("✓ Сохранить", toolbar, 3);
-        save.setContentDescription("Сохранить изменения в проекте");
+        complete.setContentDescription("袗胁褌芯写芯锌芯谢薪械薪懈械 Java");
+        TextView save = action("鉁� 小芯褏褉邪薪懈褌褜", toolbar, 3);
+        save.setContentDescription("小芯褏褉邪薪懈褌褜 懈蟹屑械薪械薪懈褟 胁 锌褉芯械泻褌械");
         save.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(save, CodeBoxTheme.PURPLE);
@@ -296,14 +485,14 @@ public class CodeEditorActivity extends Activity {
         wrapper.setGravity(Gravity.CENTER_VERTICAL);
         wrapper.setPadding(dp(10), dp(5), dp(10), dp(5));
 
-        TextView snippets = text("📚 Шаблоны", 12, true);
+        TextView snippets = text("馃摎 楔邪斜谢芯薪褘", 12, true);
         snippets.setGravity(Gravity.CENTER);
         snippets.setSingleLine(true);
         snippets.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(snippets, CodeBoxTheme.PURPLE);
 
-        TextView export = text("⇩ Экспорт TXT", 12, true);
+        TextView export = text("鈬� 协泻褋锌芯褉褌 TXT", 12, true);
         export.setGravity(Gravity.CENTER);
         export.setSingleLine(true);
         export.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
@@ -331,7 +520,7 @@ public class CodeEditorActivity extends Activity {
         try {
             startActivityForResult(intent, REQUEST_EXPORT_TEXT);
         } catch (android.content.ActivityNotFoundException e) {
-            toast("Не найдено приложение для сохранения файла");
+            toast("袧械 薪邪泄写械薪芯 锌褉懈谢芯卸械薪懈械 写谢褟 褋芯褏褉邪薪械薪懈褟 褎邪泄谢邪");
         }
     }
 
@@ -340,13 +529,13 @@ public class CodeEditorActivity extends Activity {
         if (requestCode != REQUEST_EXPORT_TEXT || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
         try (java.io.OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
-            if (output == null) throw new IOException("Не удалось открыть файл для записи");
+            if (output == null) throw new IOException("袧械 褍写邪谢芯褋褜 芯褌泻褉褘褌褜 褎邪泄谢 写谢褟 蟹邪锌懈褋懈");
             byte[] bytes = editor.getText().toString().getBytes(StandardCharsets.UTF_8);
             output.write(bytes);
             output.flush();
-            toast("Текст экспортирован в TXT");
+            toast("孝械泻褋褌 褝泻褋锌芯褉褌懈褉芯胁邪薪 胁 TXT");
         } catch (IOException e) {
-            toast("Ошибка экспорта: " + e.getMessage());
+            toast("袨褕懈斜泻邪 褝泻褋锌芯褉褌邪: " + e.getMessage());
         }
     }
 
@@ -361,7 +550,7 @@ public class CodeEditorActivity extends Activity {
         TextView language = text(getLanguageName(), 10, true);
         language.setTextColor(0xFFB9A5FF);
         bar.addView(language, new LinearLayout.LayoutParams(0, -2, 1));
-        statusText = text("● Сохранено", 10, false);
+        statusText = text("鈼� 小芯褏褉邪薪械薪芯", 10, false);
         statusText.setTextColor(0xFF71D7A4);
         bar.addView(statusText);
         panel.addView(bar);
@@ -383,8 +572,11 @@ public class CodeEditorActivity extends Activity {
         editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         editor.setPadding(dp(58), dp(16), dp(20), dp(20));
-        editor.setText(savedContent);
-        editor.setSelection(0);
+        editor.setText(initialEditorContent == null ? savedContent : initialEditorContent);
+        int cursor = restoredCursorPosition < 0 ? 0
+                : Math.min(restoredCursorPosition, editor.length());
+        editor.setSelection(cursor);
+        restoredCursorPosition = -1;
         horizontal.addView(editor, new HorizontalScrollView.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
         vertical.addView(horizontal);
@@ -408,25 +600,25 @@ public class CodeEditorActivity extends Activity {
     private void showSearchDialog() {
         EditText query = new EditText(this);
         query.setSingleLine(true);
-        query.setHint("Текст для поиска");
+        query.setHint("孝械泻褋褌 写谢褟 锌芯懈褋泻邪");
         query.setPadding(dp(16), dp(8), dp(16), dp(8));
-        new AlertDialog.Builder(this).setTitle("Найти в файле")
+        new AlertDialog.Builder(this).setTitle("袧邪泄褌懈 胁 褎邪泄谢械")
                 .setView(query)
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Найти далее", (d, w) -> findNext(query.getText().toString()))
+                .setNegativeButton("袨褌屑械薪邪", null)
+                .setPositiveButton("袧邪泄褌懈 写邪谢械械", (d, w) -> findNext(query.getText().toString()))
                 .show();
     }
 
     private void findNext(String needle) {
-        if (needle.isEmpty()) { toast("Введите текст для поиска"); return; }
+        if (needle.isEmpty()) { toast("袙胁械写懈褌械 褌械泻褋褌 写谢褟 锌芯懈褋泻邪"); return; }
         String content = editor.getText().toString();
         int start = Math.max(0, editor.getSelectionEnd());
         int found = content.indexOf(needle, start);
         if (found < 0) found = content.indexOf(needle);
-        if (found < 0) { toast("Совпадений нет"); return; }
+        if (found < 0) { toast("小芯胁锌邪写械薪懈泄 薪械褌"); return; }
         editor.requestFocus();
         editor.setSelection(found, found + needle.length());
-        toast("Найдено: строка " + lineForOffset(content, found));
+        toast("袧邪泄写械薪芯: 褋褌褉芯泻邪 " + lineForOffset(content, found));
     }
 
     private int lineForOffset(String text, int offset) {
@@ -438,31 +630,31 @@ public class CodeEditorActivity extends Activity {
     private void showGoToLineDialog() {
         EditText number = new EditText(this);
         number.setInputType(InputType.TYPE_CLASS_NUMBER);
-        number.setHint("Номер строки");
+        number.setHint("袧芯屑械褉 褋褌褉芯泻懈");
         number.setPadding(dp(16), dp(8), dp(16), dp(8));
-        new AlertDialog.Builder(this).setTitle("Перейти к строке")
-                .setView(number).setNegativeButton("Отмена", null)
-                .setPositiveButton("Перейти", (d, w) -> {
+        new AlertDialog.Builder(this).setTitle("袩械褉械泄褌懈 泻 褋褌褉芯泻械")
+                .setView(number).setNegativeButton("袨褌屑械薪邪", null)
+                .setPositiveButton("袩械褉械泄褌懈", (d, w) -> {
                     try { goToLine(Integer.parseInt(number.getText().toString())); }
-                    catch (NumberFormatException e) { toast("Неверный номер строки"); }
+                    catch (NumberFormatException e) { toast("袧械胁械褉薪褘泄 薪芯屑械褉 褋褌褉芯泻懈"); }
                 }).show();
     }
 
     private void goToLine(int requested) {
-        if (requested < 1) { toast("Номер строки должен быть положительным"); return; }
+        if (requested < 1) { toast("袧芯屑械褉 褋褌褉芯泻懈 写芯谢卸械薪 斜褘褌褜 锌芯谢芯卸懈褌械谢褜薪褘屑"); return; }
         String content = editor.getText().toString();
         int line = 1, offset = 0;
         while (line < requested && offset < content.length()) {
             if (content.charAt(offset) == '\n') line++;
             offset++;
         }
-        if (line != requested) { toast("Такой строки нет"); return; }
+        if (line != requested) { toast("孝邪泻芯泄 褋褌褉芯泻懈 薪械褌"); return; }
         editor.requestFocus();
         editor.setSelection(offset);
     }
 
     private void showCompletionDialog() {
-        if (!"JAVA".equals(getLanguageName())) { toast("Автодополнение доступно для Java"); return; }
+        if (!"JAVA".equals(getLanguageName())) { toast("袗胁褌芯写芯锌芯谢薪械薪懈械 写芯褋褌褍锌薪芯 写谢褟 Java"); return; }
         Editable content = editor.getText();
         int cursor = Math.max(0, editor.getSelectionStart());
         int start = cursor;
@@ -472,17 +664,17 @@ public class CodeEditorActivity extends Activity {
         for (String word : JAVA_WORDS) {
             if (word.startsWith(prefix) && !word.equals(prefix)) matches.add(word);
         }
-        if (matches.isEmpty()) { toast("Нет подходящих подсказок"); return; }
+        if (matches.isEmpty()) { toast("袧械褌 锌芯写褏芯写褟褖懈褏 锌芯写褋泻邪蟹芯泻"); return; }
         final int replaceStart = start;
         final int replaceEnd = cursor;
-        new AlertDialog.Builder(this).setTitle("Java: дополнить " + prefix)
+        new AlertDialog.Builder(this).setTitle("Java: 写芯锌芯谢薪懈褌褜 " + prefix)
                 .setItems(matches.toArray(new String[0]), (d, which) -> {
                     Editable latest = editor.getText();
                     if (replaceStart > latest.length() || replaceEnd > latest.length()) return;
                     latest.replace(replaceStart, replaceEnd, matches.get(which));
                     editor.setSelection(Math.min(latest.length(), replaceStart + matches.get(which).length()));
                     editor.requestFocus();
-                }).setNegativeButton("Отмена", null).show();
+                }).setNegativeButton("袨褌屑械薪邪", null).show();
     }
 
     private void showSnippetPicker() {
@@ -491,7 +683,7 @@ public class CodeEditorActivity extends Activity {
         String language;
         if (filename.endsWith(".java")) language = "java";
         else if (filename.endsWith(".xml")) language = "xml";
-        else { toast("Шаблоны доступны для Java и XML"); return; }
+        else { toast("楔邪斜谢芯薪褘 写芯褋褌褍锌薪褘 写谢褟 Java 懈 XML"); return; }
         try {
             CodeLibraryManager library = new CodeLibraryManager(this);
             List<CodeLibraryManager.Snippet> all = library.getSnippets(currentProjectName);
@@ -500,33 +692,33 @@ public class CodeEditorActivity extends Activity {
                 if (language.equals(snippet.language)) matches.add(snippet);
             }
             if (matches.isEmpty()) {
-                new AlertDialog.Builder(this).setTitle("📚 Шаблоны")
-                        .setMessage("Нет сохранённых шаблонов " + language.toUpperCase(Locale.ROOT)
-                                + ".\n\nДобавь шаблон в библиотеке кода.")
-                        .setPositiveButton("Открыть библиотеку", (d, w) -> {
+                new AlertDialog.Builder(this).setTitle("馃摎 楔邪斜谢芯薪褘")
+                        .setMessage("袧械褌 褋芯褏褉邪薪褢薪薪褘褏 褕邪斜谢芯薪芯胁 " + language.toUpperCase(Locale.ROOT)
+                                + ".\n\n袛芯斜邪胁褜 褕邪斜谢芯薪 胁 斜懈斜谢懈芯褌械泻械 泻芯写邪.")
+                        .setPositiveButton("袨褌泻褉褘褌褜 斜懈斜谢懈芯褌械泻褍", (d, w) -> {
                             Intent intent = new Intent(this, CodeLibraryActivity.class);
                             intent.putExtra("project_name", currentProjectName);
                             startActivity(intent);
-                        }).setNegativeButton("Отмена", null).show();
+                        }).setNegativeButton("袨褌屑械薪邪", null).show();
                 return;
             }
             String[] names = new String[matches.size()];
             for (int i = 0; i < matches.size(); i++) {
                 CodeLibraryManager.Snippet snippet = matches.get(i);
-                names[i] = snippet.title + (snippet.projectName.isEmpty() ? " • Общий" : " • Проект");
+                names[i] = snippet.title + (snippet.projectName.isEmpty() ? " 鈥� 袨斜褖懈泄" : " 鈥� 袩褉芯械泻褌");
             }
-            new AlertDialog.Builder(this).setTitle("📚 Вставить шаблон")
+            new AlertDialog.Builder(this).setTitle("馃摎 袙褋褌邪胁懈褌褜 褕邪斜谢芯薪")
                     .setItems(names, (d, which) -> confirmSnippetInsertion(matches.get(which)))
-                    .setNegativeButton("Отмена", null).show();
-        } catch (IOException e) { toast("Ошибка библиотеки: " + e.getMessage()); }
+                    .setNegativeButton("袨褌屑械薪邪", null).show();
+        } catch (IOException e) { toast("袨褕懈斜泻邪 斜懈斜谢懈芯褌械泻懈: " + e.getMessage()); }
     }
 
     private void confirmSnippetInsertion(CodeLibraryManager.Snippet snippet) {
         String preview = snippet.code;
         if (preview.length() > 700) preview = preview.substring(0, 700) + "\n...";
         new AlertDialog.Builder(this).setTitle(snippet.title).setMessage(preview)
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Вставить", (d, w) -> insertSnippet(snippet.code)).show();
+                .setNegativeButton("袨褌屑械薪邪", null)
+                .setPositiveButton("袙褋褌邪胁懈褌褜", (d, w) -> insertSnippet(snippet.code)).show();
     }
 
     private void insertSnippet(String code) {
@@ -545,7 +737,7 @@ public class CodeEditorActivity extends Activity {
         editor.invalidate();
         scheduleHighlight();
         editor.post(() -> updateHistoryButtons());
-        toast("Шаблон вставлен");
+        toast("楔邪斜谢芯薪 胁褋褌邪胁谢械薪");
     }
 
     private void scheduleHighlight() {
@@ -634,30 +826,30 @@ public class CodeEditorActivity extends Activity {
         }
         if (statusText != null) {
             boolean modified = hasUnsavedChanges();
-            statusText.setText(modified ? "● Изменён" : "● Сохранено");
+            statusText.setText(modified ? "鈼� 袠蟹屑械薪褢薪" : "鈼� 小芯褏褉邪薪械薪芯");
             statusText.setTextColor(modified ? 0xFFFFC978 : 0xFF71D7A4);
         }
     }
 
     private void saveFile() {
         if (editor == null || currentFile == null) return;
-        if (isImageFile(currentFile)) { toast("Нельзя сохранять изображение как текст"); return; }
+        if (isImageFile(currentFile)) { toast("袧械谢褜蟹褟 褋芯褏褉邪薪褟褌褜 懈蟹芯斜褉邪卸械薪懈械 泻邪泻 褌械泻褋褌"); return; }
         String content = editor.getText().toString();
         if (content.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
-            toast("Файл превышает ограничение 1 МБ");
+            toast("肖邪泄谢 锌褉械胁褘褕邪械褌 芯谐褉邪薪懈褔械薪懈械 1 袦袘");
             return;
         }
         Path target = currentFile.toPath();
         Path temp = null;
         try {
-            if (isBinaryFile(currentFile)) throw new IOException("Сохранение бинарного файла запрещено");
+            if (isBinaryFile(currentFile)) throw new IOException("小芯褏褉邪薪械薪懈械 斜懈薪邪褉薪芯谐芯 褎邪泄谢邪 蟹邪锌褉械褖械薪芯");
             temp = Files.createTempFile(target.getParent(), ".codebox-", ".tmp");
             Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             savedContent = content;
             updateTitle();
-            toast("Файл сохранён");
-        } catch (IOException e) { toast("Ошибка сохранения: " + e.getMessage()); }
+            toast("肖邪泄谢 褋芯褏褉邪薪褢薪");
+        } catch (IOException e) { toast("袨褕懈斜泻邪 褋芯褏褉邪薪械薪懈褟: " + e.getMessage()); }
         finally {
             if (temp != null) try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
         }
@@ -665,14 +857,14 @@ public class CodeEditorActivity extends Activity {
 
     private void attemptExit(boolean goHome) {
         if (!hasUnsavedChanges()) { navigateAway(goHome); return; }
-        new AlertDialog.Builder(this).setTitle("Несохранённые изменения")
-                .setMessage("Сохранить изменения перед выходом?")
-                .setPositiveButton("Сохранить", (d, w) -> {
+        new AlertDialog.Builder(this).setTitle("袧械褋芯褏褉邪薪褢薪薪褘械 懈蟹屑械薪械薪懈褟")
+                .setMessage("小芯褏褉邪薪懈褌褜 懈蟹屑械薪械薪懈褟 锌械褉械写 胁褘褏芯写芯屑?")
+                .setPositiveButton("小芯褏褉邪薪懈褌褜", (d, w) -> {
                     saveFile();
                     if (!hasUnsavedChanges()) navigateAway(goHome);
                 })
-                .setNegativeButton("Не сохранять", (d, w) -> navigateAway(goHome))
-                .setNeutralButton("Отмена", null).show();
+                .setNegativeButton("袧械 褋芯褏褉邪薪褟褌褜", (d, w) -> navigateAway(goHome))
+                .setNeutralButton("袨褌屑械薪邪", null).show();
     }
 
     private void navigateAway(boolean goHome) {
@@ -685,13 +877,18 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void showError(String message) {
-        new AlertDialog.Builder(this).setTitle("Ошибка редактора")
-                .setMessage(message == null ? "Неизвестная ошибка" : message)
-                .setPositiveButton("Закрыть", (d, w) -> finish())
+        new AlertDialog.Builder(this).setTitle("袨褕懈斜泻邪 褉械写邪泻褌芯褉邪")
+                .setMessage(message == null ? "袧械懈蟹胁械褋褌薪邪褟 芯褕懈斜泻邪" : message)
+                .setPositiveButton("袟邪泻褉褘褌褜", (d, w) -> finish())
                 .setCancelable(false).show();
     }
 
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (tabletExplorer != null) tabletExplorer.refresh();
+    }
 
     @Override public void onBackPressed() { attemptExit(false); }
 
@@ -726,4 +923,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-                    }
+    }

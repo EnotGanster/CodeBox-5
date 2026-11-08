@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- APK files stored in the app's cache directory -->
+    <cache-path
+        name="build_cache"
+        path="." />
+
+    <!-- APK files stored in the app's private files directory -->
+    <files-path
+        name="build_files"
+        path="." />
+
+</paths>

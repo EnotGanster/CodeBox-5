@@ -525,7 +525,7 @@ public class CodeEditorActivity extends Activity {
         }
         TextView add = text("+", 20, true);
         add.setGravity(Gravity.CENTER);
-        add.setTextColor(PURPLE);
+        add.setTextColor(CodeBoxTheme.PURPLE);
         tabsContainer.addView(add, new LinearLayout.LayoutParams(dp(38), dp(34)));
         add.setOnClickListener(v -> toast("袨褌泻褉芯泄褌械 褎邪泄谢 胁 写械褉械胁械 锌褉芯械泻褌邪 褋谢械胁邪"));
     }
@@ -1208,4 +1208,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-    }
+                                                                  }

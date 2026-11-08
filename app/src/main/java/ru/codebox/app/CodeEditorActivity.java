@@ -38,6 +38,7 @@ public class CodeEditorActivity extends Activity {
     private static final int EDITOR_MUTED = 0xFF9298AB;
     private static final int PANEL_BG = 0xFF242635;
     private static final int MAX_FILE_BYTES = 1024 * 1024;
+    private static final int REQUEST_EXPORT_TEXT = 7127;
     private static final String[] JAVA_WORDS = {
             "abstract", "assert", "boolean", "break", "byte", "case", "catch",
             "char", "class", "const", "continue", "default", "do", "double",
@@ -258,6 +259,9 @@ public class CodeEditorActivity extends Activity {
         TextView complete = action("Java+", toolbar, 2);
         complete.setContentDescription("Автодополнение Java");
         TextView save = action("✓ Сохранить", toolbar, 3);
+        save.setContentDescription("Сохранить изменения в проекте");
+        save.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(save, CodeBoxTheme.PURPLE);
         root.addView(toolbar);
         undoButton.setOnClickListener(v -> {
@@ -276,7 +280,10 @@ public class CodeEditorActivity extends Activity {
         TextView view = text(name, 12, true);
         view.setGravity(Gravity.CENTER);
         view.setSingleLine(true);
-        view.setEllipsize(TextUtils.TruncateAt.END);
+        view.setEllipsize(null);
+        view.setPadding(dp(2), 0, dp(2), 0);
+        view.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
         view.setBackground(rounded(CodeBoxTheme.background(this), 9));
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), weight);
         p.rightMargin = dp(4);
@@ -286,13 +293,61 @@ public class CodeEditorActivity extends Activity {
 
     private void createSnippetButton(LinearLayout root) {
         LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setGravity(Gravity.CENTER_VERTICAL);
         wrapper.setPadding(dp(10), dp(5), dp(10), dp(5));
-        TextView snippets = text("📚 Шаблоны Java / XML", 12, true);
+
+        TextView snippets = text("📚 Шаблоны", 12, true);
         snippets.setGravity(Gravity.CENTER);
+        snippets.setSingleLine(true);
+        snippets.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(snippets, CodeBoxTheme.PURPLE);
-        wrapper.addView(snippets, new LinearLayout.LayoutParams(-1, dp(36)));
+
+        TextView export = text("⇩ Экспорт TXT", 12, true);
+        export.setGravity(Gravity.CENTER);
+        export.setSingleLine(true);
+        export.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
+        CodeBoxTheme.styleColoredButton(export, CodeBoxTheme.PURPLE);
+
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(38), 1);
+        left.rightMargin = dp(4);
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(38), 1);
+        right.leftMargin = dp(4);
+        wrapper.addView(snippets, left);
+        wrapper.addView(export, right);
         root.addView(wrapper);
+
         snippets.setOnClickListener(v -> showSnippetPicker());
+        export.setOnClickListener(v -> exportCurrentText());
+    }
+
+    private void exportCurrentText() {
+        if (editor == null || currentFile == null) return;
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, currentFile.getName() + ".txt");
+        try {
+            startActivityForResult(intent, REQUEST_EXPORT_TEXT);
+        } catch (android.content.ActivityNotFoundException e) {
+            toast("Не найдено приложение для сохранения файла");
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_EXPORT_TEXT || resultCode != RESULT_OK
+                || data == null || data.getData() == null) return;
+        try (java.io.OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
+            if (output == null) throw new IOException("Не удалось открыть файл для записи");
+            byte[] bytes = editor.getText().toString().getBytes(StandardCharsets.UTF_8);
+            output.write(bytes);
+            output.flush();
+            toast("Текст экспортирован в TXT");
+        } catch (IOException e) {
+            toast("Ошибка экспорта: " + e.getMessage());
+        }
     }
 
     private void createEditorArea(LinearLayout root) {
@@ -671,4 +726,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-}
+                    }

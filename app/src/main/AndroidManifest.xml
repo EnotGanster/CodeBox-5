@@ -14,6 +14,8 @@
     <application
         android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="CodeBox 5"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -30,33 +32,13 @@
 
         </provider>
 
-        <activity
-            android:name=".CodeBoxBuildActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".CodeLibraryActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ImageViewerActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".GraphicsEditorActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ProjectTreeActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".CodeEditorActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".ProjectActivity"
-            android:exported="false" />
+        <activity android:name=".CodeBoxBuildActivity" android:exported="false" />
+        <activity android:name=".CodeLibraryActivity" android:exported="false" />
+        <activity android:name=".ImageViewerActivity" android:exported="false" />
+        <activity android:name=".GraphicsEditorActivity" android:exported="false" />
+        <activity android:name=".ProjectTreeActivity" android:exported="false" />
+        <activity android:name=".CodeEditorActivity" android:exported="false" />
+        <activity android:name=".ProjectActivity" android:exported="false" />
 
         <activity
             android:name=".MainActivity"
@@ -64,7 +46,6 @@
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 

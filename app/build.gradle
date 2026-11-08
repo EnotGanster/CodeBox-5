@@ -32,9 +32,8 @@ android {
 
         resources {
 
-            // Bouncy Castle libraries contain
-            // duplicate OSGi manifest resources.
-            // Exclude them from APK packaging.
+            // Exclude duplicate Bouncy Castle
+            // OSGi manifest resources.
 
             excludes += [
                 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
@@ -74,8 +73,18 @@ configurations.configureEach { config ->
     if (config.name != 'guavaJreJar'
             && config.name != 'bundletoolDependencies') {
 
+        // Prevent Android Guava from replacing
+        // the full JRE Guava.
+
         exclude group: 'com.google.guava',
                 module: 'guava'
+
+        // Full Guava JRE already contains
+        // ListenableFuture.
+        // Prevent duplicate class definitions.
+
+        exclude group: 'com.google.guava',
+                module: 'listenablefuture'
     }
 }
 
@@ -148,10 +157,8 @@ dependencies {
     // AAB signing - Bouncy Castle
     // -----------------------------------------
 
-    // Cryptographic algorithms and ASN.1.
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
-    // PKCS#7 / CMS signing support.
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
 }
 
@@ -194,7 +201,10 @@ afterEvaluate {
                                     && module.name == 'bundletool')
                                 && !(module.group ==
                                     'com.google.guava'
-                                    && module.name == 'guava')) {
+                                    && module.name == 'guava')
+                                && !(module.group ==
+                                    'com.google.guava'
+                                    && module.name == 'listenablefuture')) {
 
                             dependencies.add(
                                 'implementation',
@@ -271,6 +281,7 @@ tasks.register('diagnoseGuava') {
             runtime.resolvedConfiguration.resolvedArtifacts
 
         boolean androidGuavaFound = false
+        boolean listenableFutureFound = false
 
         artifacts.each { artifact ->
 
@@ -283,6 +294,14 @@ tasks.register('diagnoseGuava') {
 
                 println "UNEXPECTED_GUAVA: ${artifact.file.name}"
             }
+
+            if (id.group == 'com.google.guava'
+                    && id.name == 'listenablefuture') {
+
+                listenableFutureFound = true
+
+                println "UNEXPECTED_LISTENABLE_FUTURE: ${artifact.file.name}"
+            }
         }
 
         println ''
@@ -290,6 +309,7 @@ tasks.register('diagnoseGuava') {
 
         println "GUAVA_STREAMS_FOUND: ${streamsFound}"
         println "ANDROID_GUAVA_FOUND: ${androidGuavaFound}"
+        println "LISTENABLE_FUTURE_DUPLICATE: ${listenableFutureFound}"
 
         if (!streamsFound) {
             throw new GradleException(
@@ -300,6 +320,12 @@ tasks.register('diagnoseGuava') {
         if (androidGuavaFound) {
             throw new GradleException(
                 'Duplicate Guava dependency detected'
+            )
+        }
+
+        if (listenableFutureFound) {
+            throw new GradleException(
+                'Duplicate ListenableFuture dependency detected'
             )
         }
 

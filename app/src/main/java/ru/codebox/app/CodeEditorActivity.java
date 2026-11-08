@@ -527,7 +527,62 @@ public class CodeEditorActivity extends Activity {
         add.setGravity(Gravity.CENTER);
         add.setTextColor(CodeBoxTheme.PURPLE);
         tabsContainer.addView(add, new LinearLayout.LayoutParams(dp(38), dp(34)));
-        add.setOnClickListener(v -> toast("袨褌泻褉芯泄褌械 褎邪泄谢 胁 写械褉械胁械 锌褉芯械泻褌邪 褋谢械胁邪"));
+        add.setOnClickListener(v -> showOpenFileDialog());
+    }
+
+    private void showOpenFileDialog() {
+        if (projectDirectory == null) {
+            toast("袩邪锌泻邪 锌褉芯械泻褌邪 薪械写芯褋褌褍锌薪邪");
+            return;
+        }
+        List<File> files = new ArrayList<>();
+        collectProjectFiles(projectDirectory, 0, files);
+        if (files.isEmpty()) {
+            toast("袙 锌褉芯械泻褌械 锌芯泻邪 薪械褌 褌械泻褋褌芯胁褘褏 褎邪泄谢芯胁");
+            return;
+        }
+
+        String[] labels = new String[files.size()];
+        for (int i = 0; i < files.size(); i++) {
+            File file = files.get(i);
+            String relative = projectDirectory.toPath().relativize(file.toPath()).toString();
+            labels[i] = relative.replace(File.separatorChar, '/');
+            EditorTab opened = findTab(file);
+            if (opened != null) labels[i] += "  鈥� 芯褌泻褉褘褌邪";
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("袨褌泻褉褘褌褜 褎邪泄谢 锌褉芯械泻褌邪")
+                .setItems(labels, (dialog, which) -> openFileFromExplorer(files.get(which)))
+                .setNegativeButton("袨褌屑械薪邪", null)
+                .show();
+    }
+
+    private void collectProjectFiles(File directory, int depth, List<File> result) {
+        if (directory == null || depth > 20 || result.size() >= 500) return;
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        java.util.Arrays.sort(children, (a, b) -> {
+            if (a.isDirectory() != b.isDirectory()) return a.isDirectory() ? -1 : 1;
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
+        for (File child : children) {
+            if (result.size() >= 500) return;
+            try {
+                String rootPath = projectDirectory.getCanonicalPath();
+                String childPath = child.getCanonicalPath();
+                if (!childPath.startsWith(rootPath + File.separator)) continue;
+                if (java.nio.file.Files.isSymbolicLink(child.toPath())) continue;
+                if (child.isDirectory()) {
+                    collectProjectFiles(child, depth + 1, result);
+                } else if (child.isFile() && !isImageFile(child)
+                        && child.length() <= MAX_FILE_BYTES) {
+                    result.add(child);
+                }
+            } catch (IOException ignored) {
+                // Skip inaccessible entries; never expose paths outside the project.
+            }
+        }
     }
 
     private void requestCloseTab(EditorTab tab) {
@@ -1208,4 +1263,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-                                                                  }
+             }

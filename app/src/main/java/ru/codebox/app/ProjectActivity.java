@@ -21,11 +21,21 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class ProjectActivity extends Activity
         implements ProjectScreen.Listener {
 
     private static final int PICK_IMAGE = 501;
+    private static final int PICK_ZIP_PROJECT = 502;
+    private static final int MAX_ZIP_ENTRIES = 5000;
+    private static final long MAX_ZIP_TOTAL_BYTES = 200L * 1024 * 1024;
+    private static final long MAX_ZIP_ENTRY_BYTES = 50L * 1024 * 1024;
     private static final int MENU_LIBRARY = 601;
     private static final int MENU_CHECK_PROJECT = 602;
 
@@ -345,11 +355,183 @@ public class ProjectActivity extends Activity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_IMAGE || resultCode != RESULT_OK
-                || data == null || data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
-        importImage(data.getData());
+        if (requestCode == PICK_IMAGE) {
+            importImage(data.getData());
+        } else if (requestCode == PICK_ZIP_PROJECT) {
+            importZipProject(data.getData());
+        }
+    }
+
+    private void pickZipProject() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/zip", "application/x-zip-compressed", "application/octet-stream"
+        });
+        try {
+            startActivityForResult(intent, PICK_ZIP_PROJECT);
+        } catch (Exception e) {
+            error("Не удалось открыть выбор ZIP-архива: " + message(e));
+        }
+    }
+
+    /** Imports ZIP contents into the currently opened project directory. */
+    private void importZipProject(Uri uri) {
+        if (projectDirectory == null || currentDirectory == null) {
+            error("Папка проекта недоступна");
+            return;
+        }
+        final List<File> createdFiles = new ArrayList<>();
+        final List<File> createdDirectories = new ArrayList<>();
+        final Set<String> archivePaths = new HashSet<>();
+        long totalBytes = 0;
+        int entries = 0;
+        try {
+            String rootPath = projectDirectory.getCanonicalPath();
+            String targetPath = currentDirectory.getCanonicalPath();
+            if (!targetPath.equals(rootPath) && !targetPath.startsWith(rootPath + File.separator)) {
+                throw new IOException("Текущая папка находится вне проекта");
+            }
+            try (InputStream raw = getContentResolver().openInputStream(uri)) {
+                if (raw == null) throw new IOException("ZIP-архив недоступен");
+                try (ZipInputStream zip = new ZipInputStream(raw)) {
+                    ZipEntry entry;
+                    byte[] buffer = new byte[8192];
+                    while ((entry = zip.getNextEntry()) != null) {
+                        entries++;
+                        if (entries > MAX_ZIP_ENTRIES) {
+                            throw new IOException("В архиве больше 5000 элементов");
+                        }
+                        String entryName = entry.getName();
+                        File destination = resolveZipEntry(currentDirectory, entryName);
+                        String normalized = destination.getCanonicalPath();
+                        if (!archivePaths.add(normalized)) {
+                            throw new IOException("В архиве повторяется путь: " + entryName);
+                        }
+                        ensureNoSymbolicLinks(currentDirectory, destination);
+
+                        if (entry.isDirectory() || entryName.endsWith("/")) {
+                            createMissingDirectories(currentDirectory, destination, createdDirectories);
+                            if (!destination.isDirectory()) {
+                                throw new IOException("Не удалось создать папку: " + entryName);
+                            }
+                        } else {
+                            File parent = destination.getParentFile();
+                            if (parent == null) throw new IOException("Некорректный путь в ZIP");
+                            createMissingDirectories(currentDirectory, parent, createdDirectories);
+                            if (destination.exists()) {
+                                throw new IOException("Файл уже существует, перезапись запрещена: " + entryName);
+                            }
+                            long entryBytes = 0;
+                            try (FileOutputStream output = new FileOutputStream(destination)) {
+                                createdFiles.add(destination);
+                                int count;
+                                while ((count = zip.read(buffer)) != -1) {
+                                    entryBytes += count;
+                                    totalBytes += count;
+                                    if (entryBytes > MAX_ZIP_ENTRY_BYTES) {
+                                        throw new IOException("Файл в архиве больше 50 МБ: " + entryName);
+                                    }
+                                    if (totalBytes > MAX_ZIP_TOTAL_BYTES) {
+                                        throw new IOException("Общий размер распаковки больше 200 МБ");
+                                    }
+                                    output.write(buffer, 0, count);
+                                }
+                            }
+                        }
+                        zip.closeEntry();
+                    }
+                }
+            }
+            if (entries == 0) throw new IOException("ZIP-архив пуст или повреждён");
+            Toast.makeText(this, "Импорт завершён: " + entries + " элементов", Toast.LENGTH_LONG).show();
+            refreshFiles();
+        } catch (Exception e) {
+            // Roll back only objects created by this import; existing project data is untouched.
+            for (int i = createdFiles.size() - 1; i >= 0; i--) {
+                try { Files.deleteIfExists(createdFiles.get(i).toPath()); } catch (IOException ignored) { }
+            }
+            for (int i = createdDirectories.size() - 1; i >= 0; i--) {
+                try { Files.deleteIfExists(createdDirectories.get(i).toPath()); } catch (IOException ignored) { }
+            }
+            error("Ошибка импорта ZIP: " + message(e));
+            refreshFiles();
+        }
+    }
+
+    private File resolveZipEntry(File base, String entryName) throws IOException {
+        if (entryName == null || entryName.trim().isEmpty() || entryName.indexOf('\0') >= 0) {
+            throw new IOException("В архиве найден пустой или некорректный путь");
+        }
+        String normalizedName = entryName.replace('\\', '/');
+        if (normalizedName.startsWith("/") || normalizedName.matches("^[A-Za-z]:.*")) {
+            throw new IOException("Абсолютные пути в ZIP запрещены: " + entryName);
+        }
+        String[] parts = normalizedName.split("/");
+        for (String part : parts) {
+            if (part.equals("..") || part.equals(".")) {
+                throw new IOException("Небезопасный путь в ZIP: " + entryName);
+            }
+        }
+        File destination = new File(base, normalizedName).getCanonicalFile();
+        String basePath = base.getCanonicalPath();
+        if (!destination.getPath().startsWith(basePath + File.separator)) {
+            throw new IOException("Путь архива выходит за пределы проекта: " + entryName);
+        }
+        return destination;
+    }
+
+    private void ensureNoSymbolicLinks(File base, File destination) throws IOException {
+        java.nio.file.Path basePath = base.getCanonicalFile().toPath();
+        java.nio.file.Path targetPath = destination.toPath();
+        java.nio.file.Path current = basePath;
+        for (java.nio.file.Path part : basePath.relativize(targetPath)) {
+            current = current.resolve(part);
+            if (Files.isSymbolicLink(current)) {
+                throw new IOException("Символические ссылки в пути ZIP запрещены");
+            }
+        }
+    }
+
+    private void createMissingDirectories(File base, File parent, List<File> created)
+            throws IOException {
+        String basePath = base.getCanonicalPath();
+        String parentPath = parent.getCanonicalPath();
+        if (!parentPath.equals(basePath) && !parentPath.startsWith(basePath + File.separator)) {
+            throw new IOException("Папка распаковки находится вне проекта");
+        }
+        if (parent.exists()) {
+            if (!parent.isDirectory()) throw new IOException("Путь для распаковки занят файлом");
+            return;
+        }
+        File ancestor = parent;
+        List<File> missing = new ArrayList<>();
+        while (ancestor != null && !ancestor.exists() && !ancestor.equals(base)) {
+            missing.add(ancestor);
+            ancestor = ancestor.getParentFile();
+        }
+        if (ancestor == null || !ancestor.isDirectory()) {
+            throw new IOException("Не удалось определить папку распаковки");
+        }
+        for (int i = missing.size() - 1; i >= 0; i--) {
+            File dir = missing.get(i);
+            if (!dir.mkdir()) throw new IOException("Не удалось создать папку: " + dir.getName());
+            created.add(dir);
+        }
+    }
+
+    @Override
+    public void onImportZip() {
+        new AlertDialog.Builder(this)
+                .setTitle("Импорт ZIP-проекта")
+                .setMessage("Содержимое ZIP-архива будет добавлено в текущую папку проекта. Существующие файлы не перезаписываются.")
+                .setPositiveButton("Выбрать ZIP", (dialog, which) -> pickZipProject())
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     private String imageExtension(Uri uri) {
@@ -499,4 +681,4 @@ public class ProjectActivity extends Activity
         super.onResume();
         if (projectScreen != null) refreshFiles();
     }
-}
+                }

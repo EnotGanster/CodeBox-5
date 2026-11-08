@@ -86,6 +86,12 @@ configurations.configureEach { config ->
 dependencies {
 
     // -----------------------------------------
+    // AndroidX Core - FileProvider
+    // -----------------------------------------
+
+    implementation 'androidx.core:core:1.13.1'
+
+    // -----------------------------------------
     // Java compiler
     // -----------------------------------------
 

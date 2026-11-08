@@ -878,6 +878,62 @@ public class MainActivity extends Activity
         );
     }
 
+    /** Opens the local build screen for a selected project. */
+    @Override
+    public void onOpenBuild() {
+        File[] projects = sortedProjects();
+
+        if (projects.length == 0) {
+            Toast.makeText(
+                    this,
+                    "Сначала создай Android-проект",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+
+        if (projects.length == 1) {
+            openBuildScreen(projects[0].getName());
+            return;
+        }
+
+        String[] names = new String[projects.length];
+        for (int i = 0; i < projects.length; i++) {
+            names[i] = projects[i].getName();
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Выбери проект для сборки")
+                .setItems(names, (dialog, which) -> {
+                    if (which >= 0 && which < projects.length) {
+                        openBuildScreen(projects[which].getName());
+                    }
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void openBuildScreen(String projectName) {
+        Intent intent = new Intent(
+                this,
+                CodeBoxBuildActivity.class
+        );
+        intent.putExtra("project_name", projectName);
+
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(
+                    this,
+                    "Не удалось открыть экран сборки: "
+                            + (e.getMessage() == null
+                            ? "неизвестная ошибка"
+                            : e.getMessage()),
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
     private void showComingSoon(
             String feature) {
 
@@ -901,4 +957,4 @@ public class MainActivity extends Activity
             super.onBackPressed();
         }
     }
-}
+                      }

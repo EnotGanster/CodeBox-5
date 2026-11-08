@@ -39,10 +39,15 @@ import java.util.Locale;
  * AAB:
  * AAPT2 -> ECJ -> D8 -> base module ->
  * bundletool -> CMS/JAR signer ->
- * signature verification -> AAB validation ->
- * APKS API diagnostics.
+ * AAB validation -> APKS -> universal.apk ->
+ * APK signer -> verification.
  *
- * APKS diagnostics do not modify the final AAB.
+ * APKS generation is non-blocking for AAB success.
+ *
+ * Export supports:
+ * - Main signed APK
+ * - Signed AAB
+ * - Signed universal APK generated from AAB
  */
 public final class CodeBoxBuildActivity extends Activity {
 
@@ -63,6 +68,12 @@ public final class CodeBoxBuildActivity extends Activity {
     private boolean installing;
 
     private File artifactPendingExport;
+
+    /*
+     * Additional signed APK generated from AAB.
+     * Never use an APK from an earlier build.
+     */
+    private File signedUniversalApk;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -374,12 +385,16 @@ public final class CodeBoxBuildActivity extends Activity {
                             + "AAB тестовым RSA-ключом "
                             + "через CMS/PKCS#7.\n\n"
                             + "Проверим JAR-подпись и "
-                            + "структуру подписанного AAB "
-                            + "через bundletool.\n\n"
-                            + "После проверки запустим "
-                            + "диагностику API build-apks.\n\n"
-                            + "Это тестовый ключ, "
-                            + "не предназначенный "
+                            + "структуру подписанного AAB.\n\n"
+                            + "После этого попробуем создать "
+                            + "universal.apk через bundletool, "
+                            + "подписать его Android Keystore "
+                            + "и проверить подпись.\n\n"
+                            + "Если дополнительная сборка APK "
+                            + "не удастся, готовый AAB "
+                            + "останется доступен.\n\n"
+                            + "AAB подписывается тестовым "
+                            + "ключом, не предназначенным "
                             + "для публикации.";
         }
 
@@ -415,6 +430,7 @@ public final class CodeBoxBuildActivity extends Activity {
         installing = true;
         installationReport = null;
         artifactPendingExport = null;
+        signedUniversalApk = null;
 
         statusView.setText(
                 "Статус: сборка " + format.name() + "..."
@@ -911,9 +927,6 @@ public final class CodeBoxBuildActivity extends Activity {
         }
     }
 
-    /**
-     * Existing APK build pipeline.
-     */
     private void buildSignedApk(
             File linkedResources,
             File dexFile
@@ -999,11 +1012,6 @@ public final class CodeBoxBuildActivity extends Activity {
         manager.succeed(signed.signedApk);
     }
 
-    /**
-     * AAB pipeline with CMS/JAR signing,
-     * bundletool structure validation,
-     * and non-blocking APKS API diagnostics.
-     */
     private void buildSignedAab(
             File linkedResources,
             File dexFile
@@ -1162,26 +1170,24 @@ public final class CodeBoxBuildActivity extends Activity {
                         + "проверка совместимости."
         );
 
-        // New diagnostic stage.
-        // The result of this inspection must not
-        // change the successful AAB build.
-
+        /*
+         * Additional APK build.
+         *
+         * A failure must not invalidate
+         * the already verified AAB.
+         */
         diagnoseApksBuilder(signed.aabFile);
 
         manager.succeed(signed.aabFile);
     }
 
     /**
-     * NEW: Inspect the patched bundletool
-     * BuildApksCommand API on Android.
-     *
-     * The current CodeBoxApksBuilder is
-     * diagnostic-only and returns built=false.
-     *
-     * This is expected and must not cause
-     * an otherwise valid AAB build to fail.
+     * Generate and verify a signed universal APK
+     * without changing the AAB build result.
      */
     private void diagnoseApksBuilder(File signedAab) {
+
+        signedUniversalApk = null;
 
         try {
 
@@ -1190,8 +1196,8 @@ public final class CodeBoxBuildActivity extends Activity {
             );
 
             manager.info(
-                    "Проверяем API BuildApksCommand "
-                            + "в Android runtime."
+                    "Создание универсального APK "
+                            + "из подписанного AAB."
             );
 
             CodeBoxApksBuilder.Result result =
@@ -1213,16 +1219,55 @@ public final class CodeBoxBuildActivity extends Activity {
                     "APKS_BUILT: " + result.built
             );
 
-            manager.info(
-                    "Примечание: APKS_BUILT=false "
-                            + "ожидается для текущей "
-                            + "диагностической версии."
-            );
+            if (result.built
+                    && result.universalApk != null
+                    && result.universalApk.isFile()
+                    && result.universalApk.length() > 0) {
+
+                signedUniversalApk =
+                        result.universalApk;
+
+                manager.info(
+                        "SIGNED_UNIVERSAL_APK: READY"
+                );
+
+                manager.info(
+                        "APK: "
+                                + signedUniversalApk
+                                        .getAbsolutePath()
+                );
+
+                manager.info(
+                        "APK_SIZE: "
+                                + signedUniversalApk.length()
+                );
+
+                manager.info(
+                        "APK_EXPORT_AVAILABLE: YES"
+                );
+
+            } else {
+
+                manager.info(
+                        "SIGNED_UNIVERSAL_APK: UNAVAILABLE"
+                );
+
+                manager.info(
+                        "APK_EXPORT_AVAILABLE: NO"
+                );
+
+                manager.info(
+                        "Подписанный APK недоступен. "
+                                + "Готовый AAB сохраняется."
+                );
+            }
 
         } catch (Throwable error) {
 
+            signedUniversalApk = null;
+
             manager.warning(
-                    "Диагностика APKS недоступна: "
+                    "Дополнительная сборка APK недоступна: "
                             + error.getClass().getName()
                             + ": "
                             + error.getMessage()
@@ -1311,6 +1356,10 @@ public final class CodeBoxBuildActivity extends Activity {
         }
     }
 
+    /**
+     * Show an export selection dialog when
+     * both AAB and signed universal APK exist.
+     */
     private void requestArtifactExport() {
 
         if (installing) {
@@ -1327,15 +1376,78 @@ public final class CodeBoxBuildActivity extends Activity {
             return;
         }
 
-        File artifact = manager.getOutputFile();
+        File primary = manager.getOutputFile();
+
+        if (primary == null
+                || !primary.isFile()
+                || primary.length() == 0) {
+
+            toast(
+                    "Готовый файл не найден. "
+                            + "Соберите проект повторно"
+            );
+            return;
+        }
+
+        File additional = signedUniversalApk;
+
+        boolean isAab =
+                primary.getName()
+                        .toLowerCase(Locale.ROOT)
+                        .endsWith(".aab");
+
+        if (!isAab
+                || additional == null
+                || !additional.isFile()
+                || additional.length() == 0) {
+
+            openArtifactSaveDialog(primary);
+            return;
+        }
+
+        final File aab = primary;
+        final File apk = additional;
+
+        String[] choices = {
+                "Сохранить AAB — " + aab.getName(),
+                "Сохранить APK — " + apk.getName()
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("Выберите формат")
+                .setItems(
+                        choices,
+                        (dialog, which) -> {
+
+                            File selected =
+                                    which == 0 ? aab : apk;
+
+                            openArtifactSaveDialog(selected);
+                        }
+                )
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    /**
+     * Open Android's document creation UI
+     * for the selected APK or AAB.
+     */
+    private void openArtifactSaveDialog(
+            File artifact
+    ) {
+
+        if (installing) {
+            toast("Дождитесь завершения текущей операции");
+            return;
+        }
 
         if (artifact == null
                 || !artifact.isFile()
                 || artifact.length() == 0) {
 
             toast(
-                    "Готовый файл не найден. "
-                            + "Соберите проект повторно"
+                    "Файл для сохранения отсутствует"
             );
             return;
         }
@@ -1499,9 +1611,11 @@ public final class CodeBoxBuildActivity extends Activity {
                     } else {
 
                         message +=
-                                "\n\nAPK можно открыть "
-                                        + "через файловый менеджер "
-                                        + "и установить на Android.";
+                                "\n\nAPK подписан и прошёл "
+                                        + "проверку подписи.\n\n"
+                                        + "Теперь можно проверить "
+                                        + "его установку и запуск "
+                                        + "на Android.";
                     }
 
                     new AlertDialog.Builder(this)

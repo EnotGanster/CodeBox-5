@@ -1388,4 +1388,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-            }
+                    }

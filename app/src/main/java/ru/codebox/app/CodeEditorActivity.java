@@ -82,7 +82,6 @@ public class CodeEditorActivity extends Activity {
             return file.getName();
         }
     }
-
     private String savedContent = "";
     private String initialEditorContent;
     private int restoredCursorPosition = -1;
@@ -103,9 +102,7 @@ public class CodeEditorActivity extends Activity {
         }
     };
 
-    private int dp(float value) {
-        return CodeBoxTheme.dp(this, value);
-    }
+    private int dp(float value) { return CodeBoxTheme.dp(this, value); }
 
     private GradientDrawable rounded(int color, int radius) {
         GradientDrawable d = new GradientDrawable();
@@ -123,8 +120,7 @@ public class CodeEditorActivity extends Activity {
         return v;
     }
 
-    @Override
-    public void onCreate(Bundle state) {
+    @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         if (state != null) {
             editorOrientation = state.getInt("editor_orientation",
@@ -135,35 +131,25 @@ public class CodeEditorActivity extends Activity {
             initialEditorContent = state.getString("editor_draft");
             restoredCursorPosition = state.getInt("editor_cursor", -1);
         }
-
         String projectName = getIntent().getStringExtra("project_name");
         String relativePath = getIntent().getStringExtra("file_path");
-
         if (projectName == null || !projectName.matches("[A-Za-z][A-Za-z0-9_]{0,49}")
                 || relativePath == null || relativePath.isEmpty()) {
             showError("Неверные данные файла");
             return;
         }
-
         currentProjectName = projectName;
-
         try {
             File root = new File(getFilesDir(), "projects").getCanonicalFile();
             File project = new File(root, projectName).getCanonicalFile();
-
             if (!root.equals(project.getParentFile()) || !project.isDirectory()) {
                 throw new IOException("Проект не найден");
             }
-
             projectDirectory = project;
-
             File file = new File(project, relativePath).getCanonicalFile();
-
-            if (!file.getPath().startsWith(project.getPath() + File.separator)
-                    || !file.isFile()) {
-                throw new IOException("Файл недоступен или находится вне проекта");
+            if (!file.getPath().startsWith(project.getPath() + File.separator) || !file.isFile()) {
+                throw new IOException("Файл недоступен или вне проекта");
             }
-
             if (isImageFile(file)) {
                 Intent intent = new Intent(this, ImageViewerActivity.class);
                 intent.putExtra("project_name", projectName);
@@ -172,79 +158,47 @@ public class CodeEditorActivity extends Activity {
                 finish();
                 return;
             }
-
-            if (file.length() > MAX_FILE_BYTES) {
-                throw new IOException("Файл больше 1 МБ");
-            }
-
-            if (isBinaryFile(file)) {
-                throw new IOException("Бинарный файл нельзя редактировать");
-            }
-
+            if (file.length() > MAX_FILE_BYTES) throw new IOException("Файл больше 1 МБ");
+            if (isBinaryFile(file)) throw new IOException("Бинарный файл нельзя редактировать");
             currentFile = file;
             savedContent = FileUtils.readText(file);
-
-            if (initialEditorContent == null) {
-                initialEditorContent = savedContent;
-            }
-
+            if (initialEditorContent == null) initialEditorContent = savedContent;
             EditorTab initialTab = new EditorTab(file, savedContent);
             initialTab.draft = initialEditorContent;
             initialTab.cursor = Math.max(0, restoredCursorPosition);
             openTabs.add(initialTab);
-
-            if (state != null) {
-                restoreTabsFromState(state, project);
-            }
-
+            if (state != null) restoreTabsFromState(state, project);
             buildEditor();
-
-        } catch (IOException e) {
-            showError(e.getMessage());
-        }
+        } catch (IOException e) { showError(e.getMessage()); }
     }
 
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
+    @Override protected void onSaveInstanceState(Bundle outState) {
         if (editor != null) {
             outState.putString("editor_draft", editor.getText().toString());
             outState.putInt("editor_cursor", editor.getSelectionStart());
         }
-
         outState.putInt("editor_orientation", editorOrientation);
         captureCurrentTab();
-
         try {
-            if (currentFile != null) {
-                outState.putString("active_tab_path", currentFile.getCanonicalPath());
-            }
-        } catch (IOException ignored) {
-        }
-
+            if (currentFile != null) outState.putString("active_tab_path", currentFile.getCanonicalPath());
+        } catch (IOException ignored) { }
         ArrayList<String> paths = new ArrayList<>();
         ArrayList<String> drafts = new ArrayList<>();
         ArrayList<String> saved = new ArrayList<>();
         ArrayList<Integer> cursors = new ArrayList<>();
-
         for (EditorTab tab : openTabs) {
             try {
                 paths.add(tab.file.getCanonicalPath());
                 drafts.add(tab.draft);
                 saved.add(tab.saved);
                 cursors.add(tab.cursor);
-            } catch (IOException ignored) {
-            }
+            } catch (IOException ignored) { }
         }
-
         outState.putStringArrayList("open_tab_paths", paths);
         outState.putStringArrayList("open_tab_drafts", drafts);
         outState.putStringArrayList("open_tab_saved", saved);
-
         int[] cursorValues = new int[cursors.size()];
-        for (int i = 0; i < cursors.size(); i++) {
-            cursorValues[i] = cursors.get(i);
-        }
-
+        for (int i = 0; i < cursors.size(); i++) cursorValues[i] = cursors.get(i);
         outState.putIntArray("open_tab_cursors", cursorValues);
         super.onSaveInstanceState(outState);
     }
@@ -254,35 +208,23 @@ public class CodeEditorActivity extends Activity {
         ArrayList<String> drafts = state.getStringArrayList("open_tab_drafts");
         ArrayList<String> saved = state.getStringArrayList("open_tab_saved");
         int[] cursors = state.getIntArray("open_tab_cursors");
-
         if (paths == null || drafts == null || saved == null) return;
-
         openTabs.clear();
-
         for (int i = 0; i < paths.size() && i < drafts.size() && i < saved.size(); i++) {
             try {
                 File candidate = new File(paths.get(i)).getCanonicalFile();
                 String root = project.getCanonicalPath();
-
                 if (!candidate.getPath().startsWith(root + File.separator)
-                        || !candidate.isFile()
-                        || candidate.length() > MAX_FILE_BYTES
-                        || isBinaryFile(candidate)) {
-                    continue;
-                }
-
+                        || !candidate.isFile() || candidate.length() > MAX_FILE_BYTES
+                        || isBinaryFile(candidate)) continue;
                 EditorTab tab = new EditorTab(candidate, saved.get(i));
                 tab.draft = drafts.get(i);
                 tab.cursor = cursors != null && i < cursors.length ? cursors[i] : 0;
                 openTabs.add(tab);
-
-            } catch (IOException ignored) {
-            }
+            } catch (IOException ignored) { }
         }
-
         String activePath = state.getString("active_tab_path");
         EditorTab active = null;
-
         if (activePath != null) {
             for (EditorTab tab : openTabs) {
                 try {
@@ -290,21 +232,15 @@ public class CodeEditorActivity extends Activity {
                         active = tab;
                         break;
                     }
-                } catch (IOException ignored) {
-                }
+                } catch (IOException ignored) { }
             }
         }
-
-        if (active == null) {
-            active = findTab(currentFile);
-        }
-
+        if (active == null) active = findTab(currentFile);
         if (active != null) {
             currentFile = active.file;
             savedContent = active.saved;
             initialEditorContent = active.draft;
             restoredCursorPosition = Math.min(active.cursor, active.draft.length());
-
         } else if (!openTabs.isEmpty()) {
             EditorTab first = openTabs.get(0);
             currentFile = first.file;
@@ -324,9 +260,7 @@ public class CodeEditorActivity extends Activity {
         try (java.io.InputStream input = Files.newInputStream(file.toPath())) {
             byte[] buffer = new byte[4096];
             int count = input.read(buffer);
-            for (int i = 0; i < count; i++) {
-                if (buffer[i] == 0) return true;
-            }
+            for (int i = 0; i < count; i++) if (buffer[i] == 0) return true;
         }
         return false;
     }
@@ -335,7 +269,6 @@ public class CodeEditorActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(CodeBoxTheme.background(this));
-
         createHeader(root);
         createActions(root);
         createSnippetButton(root);
@@ -348,41 +281,18 @@ public class CodeEditorActivity extends Activity {
 
             tabletExplorer = new CodeBoxTabletExplorer(this, projectDirectory,
                     currentProjectName, new CodeBoxTabletExplorer.Listener() {
-                @Override
-                public void onFileSelected(File file) {
+                @Override public void onFileSelected(File file) {
                     openFileFromExplorer(file);
                 }
-
-                @Override
-                public void onHome() {
-                    attemptExit(true);
-                }
-
-                @Override
-                public void onBack() {
-                    attemptExit(false);
-                }
-
-                @Override
-                public void onUp() {
+                @Override public void onHome() { attemptExit(true); }
+                @Override public void onBack() { attemptExit(false); }
+                @Override public void onUp() {
                     if (tabletExplorer != null) tabletExplorer.refresh();
                     toast("Показан корень проекта");
                 }
-
-                @Override
-                public void onCreateFile() {
-                    showTabletCreateDialog(false);
-                }
-
-                @Override
-                public void onCreateFolder() {
-                    showTabletCreateDialog(true);
-                }
-
-                @Override
-                public void onGraphics() {
-                    openTabletGraphicsEditor();
-                }
+                @Override public void onCreateFile() { showTabletCreateDialog(false); }
+                @Override public void onCreateFolder() { showTabletCreateDialog(true); }
+                @Override public void onGraphics() { openTabletGraphicsEditor(); }
             });
 
             View explorerView = tabletExplorer.createView();
@@ -395,85 +305,68 @@ public class CodeEditorActivity extends Activity {
             editorColumn.setOrientation(LinearLayout.VERTICAL);
             createEditorArea(editorColumn);
             createBottomToolbar(editorColumn);
-
             workspace.addView(editorColumn,
                     new LinearLayout.LayoutParams(0, -1, 1f));
 
             root.addView(workspace, new LinearLayout.LayoutParams(-1, 0, 1f));
-
         } else {
             createEditorArea(root);
             createBottomToolbar(root);
         }
-
         setContentView(root);
         historyManager = new EditorHistoryManager(editor);
-
         editor.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {
                 pendingIndent = false;
                 pendingPair = 0;
                 pendingSkip = false;
             }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                 if (internalEdit || before != 0 || count != 1 || start >= s.length()) return;
-
                 char typed = s.charAt(start);
-
                 if (typed == '\n') {
                     pendingIndent = true;
                     indentPosition = start + 1;
                     return;
                 }
-
                 if (isClosingCharacter(typed) && start + 1 < s.length()
                         && s.charAt(start + 1) == typed) {
                     pendingSkip = true;
                     skipPosition = start;
                     return;
                 }
-
                 char closing = matchingClose(typed);
                 if (closing != 0 && isOpeningCharacter(typed)) {
                     pendingPair = closing;
                     pairPosition = start + 1;
                 }
             }
-
-            @Override
-            public void afterTextChanged(Editable s) {
+            @Override public void afterTextChanged(Editable s) {
                 if (internalEdit) return;
-
                 if (pendingSkip) {
                     pendingSkip = false;
                     skipExistingClosing(s, skipPosition);
-
                 } else if (pendingPair != 0) {
                     char close = pendingPair;
                     int position = pairPosition;
                     pendingPair = 0;
                     insertClosingPair(s, position, close);
-
                 } else if (pendingIndent) {
                     pendingIndent = false;
                     applyAutoIndent(s, indentPosition);
                 }
-
                 updateTitle();
                 editor.invalidate();
                 scheduleHighlight();
                 editor.post(() -> updateHistoryButtons());
             }
         });
-
         CodeSyntaxHighlighter.highlight(editor, currentFile.getName());
         updateTitle();
         updateHistoryButtons();
     }
-        private boolean isTabletLayout() {
+
+    private boolean isTabletLayout() {
         android.content.res.Configuration config = getResources().getConfiguration();
         return config.smallestScreenWidthDp >= 600 || config.screenWidthDp >= 720;
     }
@@ -498,8 +391,7 @@ public class CodeEditorActivity extends Activity {
                 return;
             }
             if (openTabs.size() >= MAX_OPEN_TABS) {
-                toast("Открыто максимум " + MAX_OPEN_TABS
-                        + " файлов. Закройте лишнюю вкладку.");
+                toast("Открыто максимум " + MAX_OPEN_TABS + " файлов. Закройте лишнюю вкладку.");
                 return;
             }
             if (canonical.length() > MAX_FILE_BYTES || isBinaryFile(canonical)) {
@@ -599,7 +491,7 @@ public class CodeEditorActivity extends Activity {
             item.addView(name);
 
             if (tab.file.equals(currentFile) && hasUnsavedChanges()) {
-                TextView dirty = text(" *", 10, true);
+                TextView dirty = text(" •", 10, true);
                 dirty.setTextColor(0xFFFFD27A);
                 item.addView(dirty);
             }
@@ -656,7 +548,7 @@ public class CodeEditorActivity extends Activity {
             String relative = projectDirectory.toPath().relativize(file.toPath()).toString();
             labels[i] = relative.replace(File.separatorChar, '/');
             EditorTab opened = findTab(file);
-            if (opened != null) labels[i] += "  — открыта";
+            if (opened != null) labels[i] += "  • открыта";
         }
 
         new AlertDialog.Builder(this)
@@ -728,9 +620,7 @@ public class CodeEditorActivity extends Activity {
             if (tab.draft.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
                 throw new IOException("Файл превышает ограничение 1 МБ");
             }
-            if (isBinaryFile(tab.file)) {
-                throw new IOException("Бинарный файл нельзя сохранить");
-            }
+            if (isBinaryFile(tab.file)) throw new IOException("Бинарный файл нельзя сохранять");
             temp = Files.createTempFile(target.getParent(), ".codebox-tab-", ".tmp");
             Files.write(temp, tab.draft.getBytes(StandardCharsets.UTF_8));
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
@@ -743,9 +633,7 @@ public class CodeEditorActivity extends Activity {
             return false;
         } finally {
             if (temp != null) {
-                try {
-                    Files.deleteIfExists(temp);
-                } catch (IOException ignored) { }
+                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
             }
         }
     }
@@ -814,34 +702,27 @@ public class CodeEditorActivity extends Activity {
         header.setPadding(dp(10), dp(9), dp(10), dp(9));
         header.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{0xFF8657F5, 0xFF6535D5, 0xFF4522A3}));
-
         TextView home = headerButton("⌂", "На главный экран");
         header.addView(home, new LinearLayout.LayoutParams(dp(38), dp(40)));
         home.setOnClickListener(v -> attemptExit(true));
-
         TextView back = headerButton("‹", "Назад к файлам");
         LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(dp(38), dp(40));
         backParams.leftMargin = dp(5);
         header.addView(back, backParams);
         back.setOnClickListener(v -> attemptExit(false));
-
         LinearLayout labels = new LinearLayout(this);
         labels.setOrientation(LinearLayout.VERTICAL);
         labels.setPadding(dp(9), 0, dp(5), 0);
-
         title = text(currentFile.getName(), 16, true);
         title.setTextColor(0xFFFFFFFF);
         title.setSingleLine(true);
         title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         labels.addView(title);
-
-        TextView subtitle = text(currentProjectName + " — Редактор", 10, false);
+        TextView subtitle = text(currentProjectName + " • Редактор", 10, false);
         subtitle.setTextColor(0xFFE8DDFF);
         subtitle.setSingleLine(true);
         labels.addView(subtitle);
-
         header.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-
         orientationButton = headerButton("↔", "Переключить ориентацию экрана");
         LinearLayout.LayoutParams orientationParams =
                 new LinearLayout.LayoutParams(dp(39), dp(40));
@@ -849,7 +730,6 @@ public class CodeEditorActivity extends Activity {
         header.addView(orientationButton, orientationParams);
         orientationButton.setOnClickListener(v -> toggleEditorOrientation());
         updateOrientationButton();
-
         TextView icon = headerButton("</>", "Редактор кода");
         header.addView(icon, new LinearLayout.LayoutParams(dp(39), dp(40)));
         root.addView(header);
@@ -885,50 +765,32 @@ public class CodeEditorActivity extends Activity {
         view.setBackground(rounded(0x33FFFFFF, 11));
         return view;
     }
-        private void createActions(LinearLayout root) {
+
+    private void createActions(LinearLayout root) {
         LinearLayout toolbar = new LinearLayout(this);
         toolbar.setGravity(Gravity.CENTER_VERTICAL);
         toolbar.setPadding(dp(7), dp(6), dp(7), dp(6));
         toolbar.setBackgroundColor(CodeBoxTheme.surface(this));
-
         undoButton = action("↶", toolbar, 1);
         redoButton = action("↷", toolbar, 1);
-
         TextView search = action("⌕", toolbar, 1);
         search.setContentDescription("Поиск по файлу");
-
         TextView go = action("№", toolbar, 1);
         go.setContentDescription("Перейти к строке");
-
         TextView complete = action("Java+", toolbar, 2);
         complete.setContentDescription("Автодополнение Java");
-
         TextView save = action("✓ Сохранить", toolbar, 3);
         save.setContentDescription("Сохранить изменения в проекте");
         save.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(save, CodeBoxTheme.PURPLE);
-
         root.addView(toolbar);
-
         undoButton.setOnClickListener(v -> {
-            if (historyManager != null) {
-                historyManager.undo();
-                updateTitle();
-                scheduleHighlight();
-                updateHistoryButtons();
-            }
+            if (historyManager != null) { historyManager.undo(); updateTitle(); scheduleHighlight(); updateHistoryButtons(); }
         });
-
         redoButton.setOnClickListener(v -> {
-            if (historyManager != null) {
-                historyManager.redo();
-                updateTitle();
-                scheduleHighlight();
-                updateHistoryButtons();
-            }
+            if (historyManager != null) { historyManager.redo(); updateTitle(); scheduleHighlight(); updateHistoryButtons(); }
         });
-
         search.setOnClickListener(v -> showSearchDialog());
         go.setOnClickListener(v -> showGoToLineDialog());
         complete.setOnClickListener(v -> showCompletionDialog());
@@ -944,7 +806,6 @@ public class CodeEditorActivity extends Activity {
         view.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         view.setBackground(rounded(CodeBoxTheme.background(this), 9));
-
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), weight);
         p.rightMargin = dp(4);
         toolbar.addView(view, p);
@@ -974,7 +835,6 @@ public class CodeEditorActivity extends Activity {
         left.rightMargin = dp(4);
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(38), 1);
         right.leftMargin = dp(4);
-
         wrapper.addView(snippets, left);
         wrapper.addView(export, right);
         root.addView(wrapper);
@@ -985,12 +845,10 @@ public class CodeEditorActivity extends Activity {
 
     private void exportCurrentText() {
         if (editor == null || currentFile == null) return;
-
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("text/plain");
         intent.putExtra(Intent.EXTRA_TITLE, currentFile.getName() + ".txt");
-
         try {
             startActivityForResult(intent, REQUEST_EXPORT_TEXT);
         } catch (android.content.ActivityNotFoundException e) {
@@ -998,25 +856,16 @@ public class CodeEditorActivity extends Activity {
         }
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-
         if (requestCode != REQUEST_EXPORT_TEXT || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
-
-        try (java.io.OutputStream output =
-                     getContentResolver().openOutputStream(data.getData(), "wt")) {
-
-            if (output == null) {
-                throw new IOException("Не удалось открыть файл для записи");
-            }
-
+        try (java.io.OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
+            if (output == null) throw new IOException("Не удалось открыть файл для записи");
             byte[] bytes = editor.getText().toString().getBytes(StandardCharsets.UTF_8);
             output.write(bytes);
             output.flush();
             toast("Текст экспортирован в TXT");
-
         } catch (IOException e) {
             toast("Ошибка экспорта: " + e.getMessage());
         }
@@ -1026,30 +875,23 @@ public class CodeEditorActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(EDITOR_BG);
-
         LinearLayout bar = new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(dp(12), dp(6), dp(12), dp(6));
         bar.setBackgroundColor(PANEL_BG);
-
         TextView language = text(getLanguageName(), 10, true);
         language.setTextColor(0xFFB9A5FF);
         bar.addView(language, new LinearLayout.LayoutParams(0, -2, 1));
-
         statusText = text("● Сохранено", 10, false);
         statusText.setTextColor(0xFF71D7A4);
         bar.addView(statusText);
-
         panel.addView(bar);
-
         ScrollView vertical = new ScrollView(this);
         vertical.setFillViewport(true);
         vertical.setVerticalScrollBarEnabled(false);
-
         HorizontalScrollView horizontal = new HorizontalScrollView(this);
         horizontal.setFillViewport(true);
         horizontal.setHorizontalScrollBarEnabled(false);
-
         editor = new CodeEditText();
         editor.setTextSize(14);
         editor.setTypeface(Typeface.MONOSPACE);
@@ -1062,17 +904,13 @@ public class CodeEditorActivity extends Activity {
         editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         editor.setPadding(dp(58), dp(16), dp(20), dp(20));
-
         editor.setText(initialEditorContent == null ? savedContent : initialEditorContent);
-
         int cursor = restoredCursorPosition < 0 ? 0
                 : Math.min(restoredCursorPosition, editor.length());
         editor.setSelection(cursor);
         restoredCursorPosition = -1;
-
         horizontal.addView(editor, new HorizontalScrollView.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
-
         vertical.addView(horizontal);
         panel.addView(vertical, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(panel, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -1088,8 +926,7 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void createBottomToolbar(LinearLayout root) {
-        root.addView(new EditorToolbar(this, editor),
-                new LinearLayout.LayoutParams(-1, dp(44)));
+        root.addView(new EditorToolbar(this, editor), new LinearLayout.LayoutParams(-1, dp(44)));
     }
 
     private void showSearchDialog() {
@@ -1097,32 +934,20 @@ public class CodeEditorActivity extends Activity {
         query.setSingleLine(true);
         query.setHint("Текст для поиска");
         query.setPadding(dp(16), dp(8), dp(16), dp(8));
-
-        new AlertDialog.Builder(this)
-                .setTitle("Найти в файле")
+        new AlertDialog.Builder(this).setTitle("Найти в файле")
                 .setView(query)
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Найти далее",
-                        (d, w) -> findNext(query.getText().toString()))
+                .setPositiveButton("Найти далее", (d, w) -> findNext(query.getText().toString()))
                 .show();
     }
 
     private void findNext(String needle) {
-        if (needle.isEmpty()) {
-            toast("Введите текст для поиска");
-            return;
-        }
-
+        if (needle.isEmpty()) { toast("Введите текст для поиска"); return; }
         String content = editor.getText().toString();
         int start = Math.max(0, editor.getSelectionEnd());
         int found = content.indexOf(needle, start);
         if (found < 0) found = content.indexOf(needle);
-
-        if (found < 0) {
-            toast("Совпадений нет");
-            return;
-        }
-
+        if (found < 0) { toast("Совпадений нет"); return; }
         editor.requestFocus();
         editor.setSelection(found, found + needle.length());
         toast("Найдено: строка " + lineForOffset(content, found));
@@ -1130,9 +955,7 @@ public class CodeEditorActivity extends Activity {
 
     private int lineForOffset(String text, int offset) {
         int line = 1;
-        for (int i = 0; i < offset && i < text.length(); i++) {
-            if (text.charAt(i) == '\n') line++;
-        }
+        for (int i = 0; i < offset && i < text.length(); i++) if (text.charAt(i) == '\n') line++;
         return line;
     }
 
@@ -1141,177 +964,107 @@ public class CodeEditorActivity extends Activity {
         number.setInputType(InputType.TYPE_CLASS_NUMBER);
         number.setHint("Номер строки");
         number.setPadding(dp(16), dp(8), dp(16), dp(8));
-
-        new AlertDialog.Builder(this)
-                .setTitle("Перейти к строке")
-                .setView(number)
-                .setNegativeButton("Отмена", null)
+        new AlertDialog.Builder(this).setTitle("Перейти к строке")
+                .setView(number).setNegativeButton("Отмена", null)
                 .setPositiveButton("Перейти", (d, w) -> {
-                    try {
-                        goToLine(Integer.parseInt(number.getText().toString()));
-                    } catch (NumberFormatException e) {
-                        toast("Неверный номер строки");
-                    }
+                    try { goToLine(Integer.parseInt(number.getText().toString())); }
+                    catch (NumberFormatException e) { toast("Неверный номер строки"); }
                 }).show();
     }
 
     private void goToLine(int requested) {
-        if (requested < 1) {
-            toast("Номер строки должен быть положительным");
-            return;
-        }
-
+        if (requested < 1) { toast("Номер строки должен быть положительным"); return; }
         String content = editor.getText().toString();
         int line = 1, offset = 0;
-
         while (line < requested && offset < content.length()) {
             if (content.charAt(offset) == '\n') line++;
             offset++;
         }
-
-        if (line != requested) {
-            toast("Такой строки нет");
-            return;
-        }
-
+        if (line != requested) { toast("Такой строки нет"); return; }
         editor.requestFocus();
         editor.setSelection(offset);
     }
 
     private void showCompletionDialog() {
-        if (!"JAVA".equals(getLanguageName())) {
-            toast("Автодополнение доступно для Java");
-            return;
-        }
-
+        if (!"JAVA".equals(getLanguageName())) { toast("Автодополнение доступно для Java"); return; }
         Editable content = editor.getText();
         int cursor = Math.max(0, editor.getSelectionStart());
         int start = cursor;
-
-        while (start > 0 && Character.isJavaIdentifierPart(content.charAt(start - 1))) {
-            start--;
-        }
-
+        while (start > 0 && Character.isJavaIdentifierPart(content.charAt(start - 1))) start--;
         String prefix = content.subSequence(start, cursor).toString();
         List<String> matches = new ArrayList<>();
-
         for (String word : JAVA_WORDS) {
             if (word.startsWith(prefix) && !word.equals(prefix)) matches.add(word);
         }
-
-        if (matches.isEmpty()) {
-            toast("Нет подходящих подсказок");
-            return;
-        }
-
+        if (matches.isEmpty()) { toast("Нет подходящих подсказок"); return; }
         final int replaceStart = start;
         final int replaceEnd = cursor;
-
-        new AlertDialog.Builder(this)
-                .setTitle("Java: дополнить " + prefix)
+        new AlertDialog.Builder(this).setTitle("Java: дополнить " + prefix)
                 .setItems(matches.toArray(new String[0]), (d, which) -> {
                     Editable latest = editor.getText();
                     if (replaceStart > latest.length() || replaceEnd > latest.length()) return;
-
                     latest.replace(replaceStart, replaceEnd, matches.get(which));
-                    editor.setSelection(Math.min(latest.length(),
-                            replaceStart + matches.get(which).length()));
+                    editor.setSelection(Math.min(latest.length(), replaceStart + matches.get(which).length()));
                     editor.requestFocus();
-                })
-                .setNegativeButton("Отмена", null)
-                .show();
+                }).setNegativeButton("Отмена", null).show();
     }
 
     private void showSnippetPicker() {
         if (editor == null || currentFile == null) return;
-
         String filename = currentFile.getName().toLowerCase(Locale.ROOT);
         String language;
-
         if (filename.endsWith(".java")) language = "java";
         else if (filename.endsWith(".xml")) language = "xml";
-        else {
-            toast("Шаблоны доступны для Java и XML");
-            return;
-        }
-
+        else { toast("Шаблоны доступны для Java и XML"); return; }
         try {
             CodeLibraryManager library = new CodeLibraryManager(this);
             List<CodeLibraryManager.Snippet> all = library.getSnippets(currentProjectName);
             List<CodeLibraryManager.Snippet> matches = new ArrayList<>();
-
             for (CodeLibraryManager.Snippet snippet : all) {
                 if (language.equals(snippet.language)) matches.add(snippet);
             }
-
             if (matches.isEmpty()) {
-                new AlertDialog.Builder(this)
-                        .setTitle("📚 Шаблоны")
+                new AlertDialog.Builder(this).setTitle("📚 Шаблоны")
                         .setMessage("Нет сохранённых шаблонов " + language.toUpperCase(Locale.ROOT)
-                                + ".\n\nДобавьте шаблон в библиотеку кода.")
+                                + ".\n\nДобавь шаблон в библиотеке кода.")
                         .setPositiveButton("Открыть библиотеку", (d, w) -> {
                             Intent intent = new Intent(this, CodeLibraryActivity.class);
                             intent.putExtra("project_name", currentProjectName);
                             startActivity(intent);
-                        })
-                        .setNegativeButton("Отмена", null)
-                        .show();
+                        }).setNegativeButton("Отмена", null).show();
                 return;
             }
-
             String[] names = new String[matches.size()];
             for (int i = 0; i < matches.size(); i++) {
                 CodeLibraryManager.Snippet snippet = matches.get(i);
-                names[i] = snippet.title + (snippet.projectName.isEmpty()
-                        ? " — Общий" : " — Проект");
+                names[i] = snippet.title + (snippet.projectName.isEmpty() ? " • Общий" : " • Проект");
             }
-
-            new AlertDialog.Builder(this)
-                    .setTitle("📚 Вставить шаблон")
+            new AlertDialog.Builder(this).setTitle("📚 Вставить шаблон")
                     .setItems(names, (d, which) -> confirmSnippetInsertion(matches.get(which)))
-                    .setNegativeButton("Отмена", null)
-                    .show();
-
-        } catch (IOException e) {
-            toast("Ошибка библиотеки: " + e.getMessage());
-        }
+                    .setNegativeButton("Отмена", null).show();
+        } catch (IOException e) { toast("Ошибка библиотеки: " + e.getMessage()); }
     }
 
     private void confirmSnippetInsertion(CodeLibraryManager.Snippet snippet) {
         String preview = snippet.code;
         if (preview.length() > 700) preview = preview.substring(0, 700) + "\n...";
-
-        new AlertDialog.Builder(this)
-                .setTitle(snippet.title)
-                .setMessage(preview)
+        new AlertDialog.Builder(this).setTitle(snippet.title).setMessage(preview)
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Вставить", (d, w) -> insertSnippet(snippet.code))
-                .show();
+                .setPositiveButton("Вставить", (d, w) -> insertSnippet(snippet.code)).show();
     }
 
     private void insertSnippet(String code) {
         if (editor == null || code == null) return;
-
         Editable content = editor.getText();
         if (content == null) return;
-
         int start = Math.max(0, Math.min(editor.getSelectionStart(), content.length()));
         int end = Math.max(0, Math.min(editor.getSelectionEnd(), content.length()));
-
-        if (start > end) {
-            int t = start;
-            start = end;
-            end = t;
-        }
-
+        if (start > end) { int t = start; start = end; end = t; }
         internalEdit = true;
         try {
             content.replace(start, end, code);
             editor.setSelection(Math.min(start + code.length(), content.length()));
-        } finally {
-            internalEdit = false;
-        }
-
+        } finally { internalEdit = false; }
         updateTitle();
         editor.invalidate();
         scheduleHighlight();
@@ -1357,54 +1110,42 @@ public class CodeEditorActivity extends Activity {
     private void insertClosingPair(Editable content, int position, char closing) {
         if (position < 0 || position > content.length()) return;
         if (position < content.length() && content.charAt(position) == closing) return;
-
         internalEdit = true;
         try {
             content.insert(position, String.valueOf(closing));
             editor.setSelection(position);
-        } finally {
-            internalEdit = false;
-        }
+        } finally { internalEdit = false; }
     }
 
     private void skipExistingClosing(Editable content, int position) {
         if (position < 0 || position + 1 >= content.length()) return;
-
         internalEdit = true;
         try {
             content.delete(position, position + 1);
             editor.setSelection(Math.min(position + 1, content.length()));
-        } finally {
-            internalEdit = false;
-        }
+        } finally { internalEdit = false; }
     }
 
     private void applyAutoIndent(Editable content, int position) {
         if (position <= 0 || position > content.length()) return;
-
         int start = position - 2;
         while (start >= 0 && content.charAt(start) != '\n') start--;
         start++;
-
         StringBuilder indent = new StringBuilder();
         for (int i = start; i < position - 1; i++) {
             char c = content.charAt(i);
             if (c == ' ' || c == '\t') indent.append(c);
             else break;
         }
-
         int last = position - 2;
         while (last >= start && Character.isWhitespace(content.charAt(last))) last--;
         if (last >= start && content.charAt(last) == '{') indent.append("    ");
         if (indent.length() == 0) return;
-
         internalEdit = true;
         try {
             content.insert(position, indent.toString());
             editor.setSelection(Math.min(position + indent.length(), content.length()));
-        } finally {
-            internalEdit = false;
-        }
+        } finally { internalEdit = false; }
     }
 
     private boolean hasUnsavedChanges() {
@@ -1415,83 +1156,55 @@ public class CodeEditorActivity extends Activity {
         if (title != null && currentFile != null) {
             title.setText(currentFile.getName() + (hasUnsavedChanges() ? " *" : ""));
         }
-
         if (statusText != null) {
             boolean modified = hasUnsavedChanges();
             statusText.setText(modified ? "● Изменён" : "● Сохранено");
             statusText.setTextColor(modified ? 0xFFFFC978 : 0xFF71D7A4);
         }
-
         refreshTabsBar();
     }
 
     private void saveFile() {
         if (editor == null || currentFile == null) return;
-        if (isImageFile(currentFile)) {
-            toast("Нельзя сохранять изображение как текст");
-            return;
-        }
-
+        if (isImageFile(currentFile)) { toast("Нельзя сохранять изображение как текст"); return; }
         String content = editor.getText().toString();
         if (content.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
             toast("Файл превышает ограничение 1 МБ");
             return;
         }
-
         Path target = currentFile.toPath();
         Path temp = null;
-
         try {
-            if (isBinaryFile(currentFile)) {
-                throw new IOException("Сохранение бинарного файла запрещено");
-            }
-
+            if (isBinaryFile(currentFile)) throw new IOException("Сохранение бинарного файла запрещено");
             temp = Files.createTempFile(target.getParent(), ".codebox-", ".tmp");
             Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
-            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
-
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             savedContent = content;
             EditorTab activeTab = findTab(currentFile);
-
             if (activeTab != null) {
                 activeTab.saved = content;
                 activeTab.draft = content;
                 activeTab.cursor = editor.getSelectionStart();
             }
-
             updateTitle();
             refreshTabsBar();
             toast("Файл сохранён");
-
-        } catch (IOException e) {
-            toast("Ошибка сохранения: " + e.getMessage());
-
-        } finally {
-            if (temp != null) {
-                try {
-                    Files.deleteIfExists(temp);
-                } catch (IOException ignored) { }
-            }
+        } catch (IOException e) { toast("Ошибка сохранения: " + e.getMessage()); }
+        finally {
+            if (temp != null) try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
         }
     }
 
     private void attemptExit(boolean goHome) {
-        if (!hasUnsavedChanges()) {
-            navigateAway(goHome);
-            return;
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle("Несохранённые изменения")
+        if (!hasUnsavedChanges()) { navigateAway(goHome); return; }
+        new AlertDialog.Builder(this).setTitle("Несохранённые изменения")
                 .setMessage("Сохранить изменения перед выходом?")
                 .setPositiveButton("Сохранить", (d, w) -> {
                     saveFile();
                     if (!hasUnsavedChanges()) navigateAway(goHome);
                 })
                 .setNegativeButton("Не сохранять", (d, w) -> navigateAway(goHome))
-                .setNeutralButton("Отмена", null)
-                .show();
+                .setNeutralButton("Отмена", null).show();
     }
 
     private void navigateAway(boolean goHome) {
@@ -1504,38 +1217,28 @@ public class CodeEditorActivity extends Activity {
     }
 
     private void showError(String message) {
-        new AlertDialog.Builder(this)
-                .setTitle("Ошибка редактора")
+        new AlertDialog.Builder(this).setTitle("Ошибка редактора")
                 .setMessage(message == null ? "Неизвестная ошибка" : message)
                 .setPositiveButton("Закрыть", (d, w) -> finish())
-                .setCancelable(false)
-                .show();
+                .setCancelable(false).show();
     }
 
-    private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
+    private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_SHORT).show(); }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
         if (tabletExplorer != null) tabletExplorer.refresh();
     }
 
-    @Override
-    public void onBackPressed() {
-        attemptExit(false);
-    }
+    @Override public void onBackPressed() { attemptExit(false); }
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy() {
         if (editor != null) editor.removeCallbacks(highlightTask);
         super.onDestroy();
     }
 
     private class CodeEditText extends EditText {
         private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
         CodeEditText() {
             super(CodeEditorActivity.this);
             linePaint.setColor(EDITOR_MUTED);
@@ -1543,28 +1246,21 @@ public class CodeEditorActivity extends Activity {
             linePaint.setTypeface(Typeface.MONOSPACE);
             linePaint.setTextAlign(Paint.Align.RIGHT);
         }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             Layout layout = getLayout();
             if (layout == null) return;
-
             CharSequence content = getText();
             int number = 1;
             drawNumber(canvas, layout, 0, number);
-
             for (int i = 0; i < content.length(); i++) {
-                if (content.charAt(i) == '\n') {
-                    drawNumber(canvas, layout, i + 1, ++number);
-                }
+                if (content.charAt(i) == '\n') drawNumber(canvas, layout, i + 1, ++number);
             }
         }
-
         private void drawNumber(Canvas canvas, Layout layout, int offset, int number) {
             int line = layout.getLineForOffset(Math.min(offset, getText().length()));
             float y = getTotalPaddingTop() + layout.getLineBaseline(line);
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-}
+                    }

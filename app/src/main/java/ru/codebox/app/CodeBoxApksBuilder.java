@@ -8,39 +8,26 @@ import com.android.tools.build.bundletool.commands.BuildApksCommand.ApkBuildMode
 import com.android.tools.build.bundletool.androidtools.Aapt2Command;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
-import java.nio.file.Path;
-
+import java.util.Enumeration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-
-import java.security.cert.Certificate;
-import java.security.cert.CertificateFactory;
-import java.security.cert.X509Certificate;
-
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-
-import java.io.InputStream;
-import java.util.Enumeration;
 
 /**
  * CodeBox 5 - APKS Builder.
  *
- * Stage 3:
- * - Build universal APKS using bundletool.
- * - Extract universal.apk.
- * - Inspect APK signature.
+ * Stage 4:
+ * AAB -> APKS -> universal.apk ->
+ * Android Keystore APK signing -> verification.
  *
- * Does not change the existing AAB.
- * Does not overwrite previous output.
+ * The original signed AAB is never modified.
  *
- * Runs on a background thread.
+ * Failure here must not fail the existing AAB build.
  */
 public final class CodeBoxApksBuilder {
 
@@ -86,10 +73,10 @@ public final class CodeBoxApksBuilder {
 
         log.append("CodeBox 5 - APKS Builder\n");
         log.append("========================\n");
-        log.append("Stage: 3 - UNIVERSAL APKS\n");
+        log.append("Stage: 4 - SIGNED UNIVERSAL APK\n");
 
-        File apks = null;
-        File apk = null;
+        File apksFile = null;
+        File extractedApk = null;
 
         try {
 
@@ -118,20 +105,15 @@ public final class CodeBoxApksBuilder {
 
             File aapt2 = findAapt2(context);
 
-            log.append("\n--- AAPT2 ---\n");
-
             if (aapt2 == null) {
                 throw new IOException(
                         "Исполняемый AAPT2 не найден"
                 );
             }
 
+            log.append("\n--- AAPT2 ---\n");
             log.append("Path: ")
                     .append(aapt2.getAbsolutePath())
-                    .append('\n');
-
-            log.append("Size: ")
-                    .append(aapt2.length())
                     .append('\n');
 
             Aapt2Command aapt2Command =
@@ -141,45 +123,41 @@ public final class CodeBoxApksBuilder {
 
             log.append("AAPT2_COMMAND: CREATED\n");
 
-            File outputDir = new File(
+            File outputRoot = new File(
                     context.getCacheDir(),
                     "apks-output-" + projectName
             );
 
-            if (!outputDir.isDirectory()
-                    && !outputDir.mkdirs()) {
+            if (!outputRoot.isDirectory()
+                    && !outputRoot.mkdirs()) {
                 throw new IOException(
                         "Не удалось создать каталог APKS"
                 );
             }
 
-            File workDir = new File(
-                    outputDir,
+            File workDirectory = new File(
+                    outputRoot,
                     "run-" + System.nanoTime()
             );
 
-            if (!workDir.mkdirs()) {
+            if (!workDirectory.mkdirs()) {
                 throw new IOException(
                         "Не удалось создать рабочий каталог"
                 );
             }
 
-            apks = new File(
-                    workDir,
+            apksFile = new File(
+                    workDirectory,
                     projectName + ".apks"
             );
 
-            apk = new File(
-                    workDir,
+            extractedApk = new File(
+                    workDirectory,
                     "universal.apk"
             );
 
             log.append("\n--- Build APKS ---\n");
             log.append("Mode: UNIVERSAL\n");
-
-            log.append("Output: ")
-                    .append(apks.getAbsolutePath())
-                    .append('\n');
 
             BuildApksCommand command =
                     BuildApksCommand.builder()
@@ -187,7 +165,7 @@ public final class CodeBoxApksBuilder {
                                     aabFile.toPath()
                             )
                             .setOutputFile(
-                                    apks.toPath()
+                                    apksFile.toPath()
                             )
                             .setApkBuildMode(
                                     ApkBuildMode.UNIVERSAL
@@ -204,79 +182,99 @@ public final class CodeBoxApksBuilder {
 
             log.append("COMMAND_EXECUTED: OK\n");
 
-            if (!apks.isFile()
-                    || apks.length() == 0) {
+            if (!apksFile.isFile()
+                    || apksFile.length() == 0) {
                 throw new IOException(
                         "Bundletool не создал APKS"
                 );
             }
 
-            if (apks.length() > MAX_APKS_BYTES) {
+            if (apksFile.length() > MAX_APKS_BYTES) {
                 throw new IOException(
-                        "APKS превышает ограничение размера"
+                        "APKS превышает лимит размера"
                 );
             }
 
             log.append("APKS_CREATED: OK\n");
-
             log.append("APKS_SIZE: ")
-                    .append(apks.length())
+                    .append(apksFile.length())
                     .append('\n');
 
             extractUniversalApk(
-                    apks,
-                    apk,
+                    apksFile,
+                    extractedApk,
                     log
             );
 
-            log.append("\n--- APK verification ---\n");
+            log.append("\n--- APK Signing ---\n");
 
-            if (!apk.isFile()
-                    || apk.length() == 0) {
+            log.append(
+                    "Signing engine: CodeBoxApkSigner\n"
+            );
+
+            log.append(
+                    "Signing key: persistent Android Keystore\n"
+            );
+
+            CodeBoxApkSigner.Result signed =
+                    CodeBoxApkSigner.sign(
+                            context,
+                            extractedApk,
+                            projectName
+                    );
+
+            if (signed.report != null) {
+                log.append(signed.report).append('\n');
+            }
+
+            if (!signed.signed
+                    || signed.signedApk == null
+                    || !signed.signedApk.isFile()
+                    || signed.signedApk.length() == 0) {
+
                 throw new IOException(
-                        "universal.apk отсутствует"
+                        "Не удалось подписать или проверить "
+                                + "universal.apk"
                 );
             }
 
-            log.append("UNIVERSAL_APK_CREATED: OK\n");
+            log.append("\n--- Final APK ---\n");
 
-            log.append("APK_SIZE: ")
-                    .append(apk.length())
+            log.append("SIGNED_UNIVERSAL_APK: OK\n");
+            log.append("APK_SIGNATURE_VERIFIED: OK\n");
+
+            log.append("APK: ")
+                    .append(
+                            signed.signedApk.getAbsolutePath()
+                    )
                     .append('\n');
 
-            /*
-             * A valid APK archive is not necessarily
-             * a signed and installable APK.
-             *
-             * Stage 3 intentionally does not
-             * claim APK signing success.
-             */
+            log.append("APK_SIZE: ")
+                    .append(
+                            signed.signedApk.length()
+                    )
+                    .append('\n');
 
             log.append(
-                    "APK_SIGNATURE_VERIFIED: NO\n"
+                    "APK_SIGNATURE_SCHEME: V2\n"
             );
 
             log.append(
-                    "APK_INSTALLABLE: NOT_CONFIRMED\n"
+                    "APK_INSTALLATION: NOT_TESTED\n"
             );
 
             log.append(
-                    "\nAPKS generation completed.\n"
+                    "APKS_BUILT: true\n"
             );
 
             log.append(
-                    "APK signing requires a separate "
-                            + "verification stage.\n"
-            );
-
-            log.append(
-                    "Status: APKS_CREATED\n"
+                    "Status: SUCCEEDED\n"
             );
 
             return new Result(
                     true,
-                    apks,
-                    apk,
+                    apksFile,
+                    signed.signedApk,
                     log.toString()
             );
 
@@ -286,15 +284,23 @@ public final class CodeBoxApksBuilder {
 
             appendError(log, error);
 
-            log.append("\nAPKS_BUILT: false\n");
-            log.append("Status: FAILED\n");
+            log.append(
+                    "\nSIGNED_UNIVERSAL_APK: FAILED\n"
+            );
+
+            log.append(
+                    "APKS_BUILT: false\n"
+            );
+
+            log.append(
+                    "Status: FAILED\n"
+            );
 
             return new Result(
                     false,
-                    apks != null && apks.isFile()
-                            ? apks : null,
-                    apk != null && apk.isFile()
-                            ? apk : null,
+                    apksFile != null && apksFile.isFile()
+                            ? apksFile : null,
+                    null,
                     log.toString()
             );
         }
@@ -376,7 +382,9 @@ public final class CodeBoxApksBuilder {
             StringBuilder log
     ) throws IOException {
 
-        log.append("\n--- Extract universal APK ---\n");
+        log.append(
+                "\n--- Extract universal APK ---\n"
+        );
 
         try (ZipFile zip = new ZipFile(apksFile)) {
 

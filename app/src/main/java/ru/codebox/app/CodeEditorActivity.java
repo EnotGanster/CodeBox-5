@@ -3,6 +3,9 @@ package ru.codebox.app;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
@@ -24,8 +27,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -43,6 +51,7 @@ public class CodeEditorActivity extends Activity {
     private static final int PANEL_BG = 0xFF242635;
     private static final int MAX_FILE_BYTES = 1024 * 1024;
     private static final int REQUEST_EXPORT_TEXT = 7127;
+    private static final int REQUEST_IMPORT_CODE = 7128;
     private static final String[] JAVA_WORDS = {
             "abstract", "assert", "boolean", "break", "byte", "case", "catch",
             "char", "class", "const", "continue", "default", "do", "double",
@@ -934,6 +943,107 @@ public class CodeEditorActivity extends Activity {
 
         snippets.setOnClickListener(v -> showSnippetPicker());
         export.setOnClickListener(v -> exportCurrentText());
+
+        TextView importCode = text("⬇ Загрузить код из файла", 12, true);
+        importCode.setGravity(Gravity.CENTER);
+        importCode.setSingleLine(true);
+        importCode.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
+        CodeBoxTheme.styleColoredButton(importCode, CodeBoxTheme.PURPLE);
+        LinearLayout importWrapper = new LinearLayout(this);
+        importWrapper.setPadding(dp(10), 0, dp(10), dp(5));
+        importWrapper.addView(importCode, new LinearLayout.LayoutParams(-1, dp(38)));
+        root.addView(importWrapper);
+        importCode.setOnClickListener(v -> openCodeImportPicker());
+    }
+
+    private void openCodeImportPicker() {
+        if (editor == null || currentFile == null) return;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_TITLE, "Выберите файл с исходным кодом");
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_CODE);
+        } catch (android.content.ActivityNotFoundException e) {
+            toast("Не найден системный проводник файлов");
+        }
+    }
+
+    private String getPickedFileName(Uri uri) {
+        if (uri == null) return "выбранный файл";
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) {
+                    String name = cursor.getString(index);
+                    if (name != null && !name.trim().isEmpty()) return name;
+                }
+            }
+        } catch (Exception ignored) { }
+        return "выбранный файл";
+    }
+
+    private String readCodeFromUri(Uri uri) throws IOException {
+        if (uri == null) throw new IOException("Файл не выбран");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IOException("Не удалось открыть выбранный файл");
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (bytes.size() + count > MAX_FILE_BYTES) {
+                    throw new IOException("Файл больше 1 МБ. Импорт отменён");
+                }
+                bytes.write(buffer, 0, count);
+            }
+        }
+        byte[] data = bytes.toByteArray();
+        if (data.length == 0) throw new IOException("Выбранный файл пустой");
+        for (byte value : data) {
+            if (value == 0) throw new IOException("Похоже, выбран бинарный файл, а не исходный код");
+        }
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(data)).toString();
+        } catch (CharacterCodingException e) {
+            throw new IOException("Файл не является корректным текстом UTF-8", e);
+        }
+    }
+
+    private void confirmCodeImport(String importedCode, String sourceName) {
+        if (editor == null) return;
+        String current = editor.getText().toString();
+        if (current.trim().isEmpty()) {
+            applyImportedCode(importedCode, sourceName);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Заменить содержимое файла?")
+                .setMessage("Код из «" + sourceName + "» полностью заменит текущее содержимое файла «"
+                        + currentFile.getName() + "». Продолжить?")
+                .setPositiveButton("Заменить", (dialog, which) -> applyImportedCode(importedCode, sourceName))
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void applyImportedCode(String importedCode, String sourceName) {
+        if (editor == null || importedCode == null) return;
+        internalEdit = true;
+        try {
+            editor.setText(importedCode);
+            editor.setSelection(0);
+        } finally {
+            internalEdit = false;
+        }
+        updateTitle();
+        editor.invalidate();
+        scheduleHighlight();
+        editor.post(() -> updateHistoryButtons());
+        toast("Код загружен из «" + sourceName + "». Нажмите «Сохранить»");
     }
 
     private void exportCurrentText() {
@@ -951,16 +1061,31 @@ public class CodeEditorActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_EXPORT_TEXT || resultCode != RESULT_OK
-                || data == null || data.getData() == null) return;
-        try (java.io.OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
-            if (output == null) throw new IOException("Не удалось открыть файл для записи");
-            byte[] bytes = editor.getText().toString().getBytes(StandardCharsets.UTF_8);
-            output.write(bytes);
-            output.flush();
-            toast("Текст экспортирован в TXT");
-        } catch (IOException e) {
-            toast("Ошибка экспорта: " + e.getMessage());
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+
+        if (requestCode == REQUEST_IMPORT_CODE) {
+            Uri uri = data.getData();
+            String sourceName = getPickedFileName(uri);
+            try {
+                String importedCode = readCodeFromUri(uri);
+                confirmCodeImport(importedCode, sourceName);
+            } catch (IOException e) {
+                toast("Ошибка загрузки кода: " + e.getMessage());
+            }
+            return;
+        }
+
+        if (requestCode == REQUEST_EXPORT_TEXT) {
+            try (java.io.OutputStream output = getContentResolver()
+                    .openOutputStream(data.getData(), "wt")) {
+                if (output == null) throw new IOException("Не удалось открыть файл для записи");
+                byte[] bytes = editor.getText().toString().getBytes(StandardCharsets.UTF_8);
+                output.write(bytes);
+                output.flush();
+                toast("Текст экспортирован в TXT");
+            } catch (IOException e) {
+                toast("Ошибка экспорта: " + e.getMessage());
+            }
         }
     }
 
@@ -1388,4 +1513,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-                    }
+            }

@@ -38,6 +38,7 @@ public class ProjectActivity extends Activity
     private static final long MAX_ZIP_ENTRY_BYTES = 50L * 1024 * 1024;
     private static final int MENU_LIBRARY = 601;
     private static final int MENU_CHECK_PROJECT = 602;
+    private static final int MENU_BUILD = 603;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -80,7 +81,9 @@ public class ProjectActivity extends Activity
         super.onCreateOptionsMenu(menu);
         menu.add(Menu.NONE, MENU_LIBRARY, Menu.NONE, "📚 Библиотека кода")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(Menu.NONE, MENU_CHECK_PROJECT, Menu.NONE, "🔨 Проверить проект")
+        menu.add(Menu.NONE, MENU_BUILD, Menu.NONE, "🔨 Собрать APK / AAB")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(Menu.NONE, MENU_CHECK_PROJECT, Menu.NONE, "🔎 Проверить проект")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
@@ -91,11 +94,31 @@ public class ProjectActivity extends Activity
             openCodeLibrary();
             return true;
         }
+        if (item.getItemId() == MENU_BUILD) {
+            openBuildScreen();
+            return true;
+        }
         if (item.getItemId() == MENU_CHECK_PROJECT) {
             checkProject();
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    /** Opens the existing offline APK/AAB build screen for this project. */
+    private void openBuildScreen() {
+        if (projectDirectory == null || !projectDirectory.isDirectory()) {
+            error("Проект не выбран или недоступен");
+            return;
+        }
+        try {
+            Intent intent = new Intent(this, CodeBoxBuildActivity.class);
+            intent.putExtra("project_name", projectDirectory.getName());
+            intent.putExtra("project_path", projectDirectory.getCanonicalPath());
+            startActivity(intent);
+        } catch (Exception e) {
+            error("Не удалось открыть сборку: " + message(e));
+        }
     }
 
     private void checkProject() {
@@ -681,4 +704,4 @@ public class ProjectActivity extends Activity
         super.onResume();
         if (projectScreen != null) refreshFiles();
     }
-                }
+                            }

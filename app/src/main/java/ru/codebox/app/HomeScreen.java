@@ -19,6 +19,9 @@ public final class HomeScreen {
         void onOpenCodeLibrary();
         void onCombineCode();
         void onOpenGraphics();
+
+        default void onOpenBuild() {
+        }
     }
 
     private final Activity activity;
@@ -445,7 +448,7 @@ public final class HomeScreen {
         );
 
         TextView caption = text(
-                "5 разделов",
+                "6 разделов",
                 12,
                 false
         );
@@ -512,6 +515,15 @@ public final class HomeScreen {
                 "Изображения и ресурсы",
                 0xFFCB70A9,
                 listener::onOpenGraphics
+        );
+
+        addTool(
+                parent,
+                "⚙",
+                "Сборка APK / AAB",
+                "Локальная сборка Android-проектов",
+                CodeBoxTheme.BLUE,
+                listener::onOpenBuild
         );
 
         TextView create = text(

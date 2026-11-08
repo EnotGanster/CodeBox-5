@@ -61,6 +61,27 @@ public class CodeEditorActivity extends Activity {
     private File currentFile;
     private File projectDirectory;
     private CodeBoxTabletExplorer tabletExplorer;
+    private final List<EditorTab> openTabs = new ArrayList<>();
+    private LinearLayout tabsContainer;
+    private static final int MAX_OPEN_TABS = 12;
+
+    private static final class EditorTab {
+        final File file;
+        String saved;
+        String draft;
+        int cursor;
+
+        EditorTab(File file, String content) {
+            this.file = file;
+            this.saved = content;
+            this.draft = content;
+            this.cursor = 0;
+        }
+
+        String title() {
+            return file.getName();
+        }
+    }
     private String savedContent = "";
     private String initialEditorContent;
     private int restoredCursorPosition = -1;
@@ -142,6 +163,11 @@ public class CodeEditorActivity extends Activity {
             currentFile = file;
             savedContent = FileUtils.readText(file);
             if (initialEditorContent == null) initialEditorContent = savedContent;
+            EditorTab initialTab = new EditorTab(file, savedContent);
+            initialTab.draft = initialEditorContent;
+            initialTab.cursor = Math.max(0, restoredCursorPosition);
+            openTabs.add(initialTab);
+            if (state != null) restoreTabsFromState(state, project);
             buildEditor();
         } catch (IOException e) { showError(e.getMessage()); }
     }
@@ -152,7 +178,76 @@ public class CodeEditorActivity extends Activity {
             outState.putInt("editor_cursor", editor.getSelectionStart());
         }
         outState.putInt("editor_orientation", editorOrientation);
+        captureCurrentTab();
+        try {
+            if (currentFile != null) outState.putString("active_tab_path", currentFile.getCanonicalPath());
+        } catch (IOException ignored) { }
+        ArrayList<String> paths = new ArrayList<>();
+        ArrayList<String> drafts = new ArrayList<>();
+        ArrayList<String> saved = new ArrayList<>();
+        ArrayList<Integer> cursors = new ArrayList<>();
+        for (EditorTab tab : openTabs) {
+            try {
+                paths.add(tab.file.getCanonicalPath());
+                drafts.add(tab.draft);
+                saved.add(tab.saved);
+                cursors.add(tab.cursor);
+            } catch (IOException ignored) { }
+        }
+        outState.putStringArrayList("open_tab_paths", paths);
+        outState.putStringArrayList("open_tab_drafts", drafts);
+        outState.putStringArrayList("open_tab_saved", saved);
+        int[] cursorValues = new int[cursors.size()];
+        for (int i = 0; i < cursors.size(); i++) cursorValues[i] = cursors.get(i);
+        outState.putIntArray("open_tab_cursors", cursorValues);
         super.onSaveInstanceState(outState);
+    }
+
+    private void restoreTabsFromState(Bundle state, File project) {
+        ArrayList<String> paths = state.getStringArrayList("open_tab_paths");
+        ArrayList<String> drafts = state.getStringArrayList("open_tab_drafts");
+        ArrayList<String> saved = state.getStringArrayList("open_tab_saved");
+        int[] cursors = state.getIntArray("open_tab_cursors");
+        if (paths == null || drafts == null || saved == null) return;
+        openTabs.clear();
+        for (int i = 0; i < paths.size() && i < drafts.size() && i < saved.size(); i++) {
+            try {
+                File candidate = new File(paths.get(i)).getCanonicalFile();
+                String root = project.getCanonicalPath();
+                if (!candidate.getPath().startsWith(root + File.separator)
+                        || !candidate.isFile() || candidate.length() > MAX_FILE_BYTES
+                        || isBinaryFile(candidate)) continue;
+                EditorTab tab = new EditorTab(candidate, saved.get(i));
+                tab.draft = drafts.get(i);
+                tab.cursor = cursors != null && i < cursors.length ? cursors[i] : 0;
+                openTabs.add(tab);
+            } catch (IOException ignored) { }
+        }
+        String activePath = state.getString("active_tab_path");
+        EditorTab active = null;
+        if (activePath != null) {
+            for (EditorTab tab : openTabs) {
+                try {
+                    if (tab.file.getCanonicalPath().equals(activePath)) {
+                        active = tab;
+                        break;
+                    }
+                } catch (IOException ignored) { }
+            }
+        }
+        if (active == null) active = findTab(currentFile);
+        if (active != null) {
+            currentFile = active.file;
+            savedContent = active.saved;
+            initialEditorContent = active.draft;
+            restoredCursorPosition = Math.min(active.cursor, active.draft.length());
+        } else if (!openTabs.isEmpty()) {
+            EditorTab first = openTabs.get(0);
+            currentFile = first.file;
+            savedContent = first.saved;
+            initialEditorContent = first.draft;
+            restoredCursorPosition = Math.min(first.cursor, first.draft.length());
+        }
     }
 
     private boolean isImageFile(File file) {
@@ -177,6 +272,7 @@ public class CodeEditorActivity extends Activity {
         createHeader(root);
         createActions(root);
         createSnippetButton(root);
+        createTabsBar(root);
 
         if (isTabletLayout()) {
             LinearLayout workspace = new LinearLayout(this);
@@ -285,38 +381,219 @@ public class CodeEditorActivity extends Activity {
                 toast("肖邪泄谢 薪械写芯褋褌褍锌械薪 懈谢懈 薪邪褏芯写懈褌褋褟 胁薪械 锌褉芯械泻褌邪");
                 return;
             }
-            if (canonical.equals(currentFile)) return;
+            if (isImageFile(canonical)) {
+                toast("袠蟹芯斜褉邪卸械薪懈褟 芯褌泻褉褘胁邪褞褌褋褟 胁 锌褉芯褋屑芯褌褉褖懈泻械 锌褉芯械泻褌邪");
+                return;
+            }
+            EditorTab existing = findTab(canonical);
+            if (existing != null) {
+                switchToTab(existing);
+                return;
+            }
+            if (openTabs.size() >= MAX_OPEN_TABS) {
+                toast("袨褌泻褉褘褌芯 屑邪泻褋懈屑褍屑 " + MAX_OPEN_TABS + " 褎邪泄谢芯胁. 袟邪泻褉芯泄褌械 谢懈褕薪褞褞 胁泻谢邪写泻褍.");
+                return;
+            }
+            if (canonical.length() > MAX_FILE_BYTES || isBinaryFile(canonical)) {
+                toast("协褌芯褌 褎邪泄谢 薪械谢褜蟹褟 芯褌泻褉褘褌褜 胁 褌械泻褋褌芯胁芯屑 褉械写邪泻褌芯褉械");
+                return;
+            }
             if (hasUnsavedChanges()) {
                 new AlertDialog.Builder(this)
                         .setTitle("袧械褋芯褏褉邪薪褢薪薪褘械 懈蟹屑械薪械薪懈褟")
                         .setMessage("小芯褏褉邪薪懈褌褜 褌械泻褍褖懈泄 褎邪泄谢 锌械褉械写 芯褌泻褉褘褌懈械屑 写褉褍谐芯谐芯?")
                         .setPositiveButton("小芯褏褉邪薪懈褌褜", (d, w) -> {
                             saveFile();
-                            if (!hasUnsavedChanges()) launchEditorFile(canonical);
+                            if (!hasUnsavedChanges()) addAndSwitchTab(canonical);
                         })
                         .setNegativeButton("袨褌泻褉褘褌褜 斜械蟹 褋芯褏褉邪薪械薪懈褟",
-                                (d, w) -> launchEditorFile(canonical))
+                                (d, w) -> addAndSwitchTab(canonical))
                         .setNeutralButton("袨褌屑械薪邪", null)
                         .show();
             } else {
-                launchEditorFile(canonical);
+                addAndSwitchTab(canonical);
             }
         } catch (IOException e) {
             toast("袨褕懈斜泻邪 芯褌泻褉褘褌懈褟: " + e.getMessage());
         }
     }
 
-    private void launchEditorFile(File file) {
-        if (projectDirectory == null || file == null) return;
+    private EditorTab findTab(File file) {
+        if (file == null) return null;
         try {
-            String relative = file.getCanonicalPath().substring(
-                    projectDirectory.getCanonicalPath().length() + 1);
-            Intent intent = new Intent(this, CodeEditorActivity.class);
-            intent.putExtra("project_name", currentProjectName);
-            intent.putExtra("file_path", relative);
-            startActivity(intent);
+            String target = file.getCanonicalPath();
+            for (EditorTab tab : openTabs) {
+                if (tab.file.getCanonicalPath().equals(target)) return tab;
+            }
+        } catch (IOException ignored) { }
+        return null;
+    }
+
+    private void captureCurrentTab() {
+        EditorTab active = findTab(currentFile);
+        if (active == null || editor == null) return;
+        active.draft = editor.getText().toString();
+        active.saved = savedContent;
+        active.cursor = editor.getSelectionStart();
+    }
+
+    private void addAndSwitchTab(File file) {
+        try {
+            String content = FileUtils.readText(file);
+            EditorTab tab = new EditorTab(file, content);
+            openTabs.add(tab);
+            switchToTab(tab);
         } catch (IOException e) {
-            toast("袨褕懈斜泻邪 锌褍褌懈 褎邪泄谢邪: " + e.getMessage());
+            toast("袧械 褍写邪谢芯褋褜 锌褉芯褔懈褌邪褌褜 褎邪泄谢: " + e.getMessage());
+        }
+    }
+
+    private void switchToTab(EditorTab tab) {
+        if (tab == null) return;
+        captureCurrentTab();
+        currentFile = tab.file;
+        savedContent = tab.saved;
+        initialEditorContent = tab.draft;
+        restoredCursorPosition = Math.min(tab.cursor, tab.draft.length());
+        buildEditor();
+    }
+
+    private void createTabsBar(LinearLayout parent) {
+        HorizontalScrollView horizontal = new HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        horizontal.setFillViewport(false);
+        horizontal.setBackgroundColor(CodeBoxTheme.surface(this));
+        tabsContainer = new LinearLayout(this);
+        tabsContainer.setOrientation(LinearLayout.HORIZONTAL);
+        tabsContainer.setGravity(Gravity.CENTER_VERTICAL);
+        tabsContainer.setPadding(dp(6), dp(4), dp(6), dp(4));
+        horizontal.addView(tabsContainer, new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT, dp(42)));
+        parent.addView(horizontal, new LinearLayout.LayoutParams(-1, dp(42)));
+        refreshTabsBar();
+    }
+
+    private void refreshTabsBar() {
+        if (tabsContainer == null) return;
+        tabsContainer.removeAllViews();
+        for (EditorTab tab : openTabs) {
+            boolean active = tab.file.equals(currentFile);
+            LinearLayout item = new LinearLayout(this);
+            item.setGravity(Gravity.CENTER_VERTICAL);
+            item.setPadding(dp(9), 0, dp(5), 0);
+            item.setBackground(rounded(active ? 0xFF6535D5 : 0xFFEAE6F2, 9));
+
+            TextView name = text(tab.title(), 11, active);
+            name.setTextColor(active ? 0xFFFFFFFF : CodeBoxTheme.textColor(this));
+            name.setSingleLine(true);
+            name.setMaxWidth(dp(145));
+            name.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            item.addView(name);
+
+            if (tab.file.equals(currentFile) && hasUnsavedChanges()) {
+                TextView dirty = text(" 鈥�", 10, true);
+                dirty.setTextColor(0xFFFFD27A);
+                item.addView(dirty);
+            }
+
+            TextView close = text(" 脳 ", 16, true);
+            close.setTextColor(active ? 0xFFFFFFFF : CodeBoxTheme.textColor(this));
+            close.setGravity(Gravity.CENTER);
+            item.addView(close, new LinearLayout.LayoutParams(dp(27), dp(34)));
+            close.setOnClickListener(v -> requestCloseTab(tab));
+            item.setOnClickListener(v -> {
+                if (!tab.file.equals(currentFile)) {
+                    if (hasUnsavedChanges()) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("袧械褋芯褏褉邪薪褢薪薪褘械 懈蟹屑械薪械薪懈褟")
+                                .setMessage("小芯褏褉邪薪懈褌褜 褌械泻褍褖懈泄 褎邪泄谢 锌械褉械写 锌械褉械泻谢褞褔械薪懈械屑?")
+                                .setPositiveButton("小芯褏褉邪薪懈褌褜", (d, w) -> {
+                                    saveFile();
+                                    if (!hasUnsavedChanges()) switchToTab(tab);
+                                })
+                                .setNegativeButton("袩械褉械泻谢褞褔懈褌褜 斜械蟹 褋芯褏褉邪薪械薪懈褟",
+                                        (d, w) -> switchToTab(tab))
+                                .setNeutralButton("袨褌屑械薪邪", null).show();
+                    } else {
+                        switchToTab(tab);
+                    }
+                }
+            });
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-2, dp(34));
+            p.rightMargin = dp(5);
+            tabsContainer.addView(item, p);
+        }
+        TextView add = text("+", 20, true);
+        add.setGravity(Gravity.CENTER);
+        add.setTextColor(PURPLE);
+        tabsContainer.addView(add, new LinearLayout.LayoutParams(dp(38), dp(34)));
+        add.setOnClickListener(v -> toast("袨褌泻褉芯泄褌械 褎邪泄谢 胁 写械褉械胁械 锌褉芯械泻褌邪 褋谢械胁邪"));
+    }
+
+    private void requestCloseTab(EditorTab tab) {
+        if (tab == null || openTabs.size() <= 1) {
+            toast("袨褋褌邪胁褜褌械 褏芯褌褟 斜褘 芯写薪褍 芯褌泻褉褘褌褍褞 胁泻谢邪写泻褍");
+            return;
+        }
+        boolean active = tab.file.equals(currentFile);
+        boolean dirty = active ? hasUnsavedChanges() : !tab.draft.equals(tab.saved);
+        if (dirty) {
+            new AlertDialog.Builder(this)
+                    .setTitle("袟邪泻褉褘褌褜 胁泻谢邪写泻褍?")
+                    .setMessage("袙 褎邪泄谢械 械褋褌褜 薪械褋芯褏褉邪薪褢薪薪褘械 懈蟹屑械薪械薪懈褟.")
+                    .setPositiveButton("小芯褏褉邪薪懈褌褜", (d, w) -> {
+                        if (active) {
+                            saveFile();
+                            if (!hasUnsavedChanges()) closeTabNow(tab);
+                        } else if (saveInactiveTab(tab)) {
+                            closeTabNow(tab);
+                        }
+                    })
+                    .setNegativeButton("袟邪泻褉褘褌褜 斜械蟹 褋芯褏褉邪薪械薪懈褟",
+                            (d, w) -> closeTabNow(tab))
+                    .setNeutralButton("袨褌屑械薪邪", null).show();
+        } else {
+            closeTabNow(tab);
+        }
+    }
+
+    private boolean saveInactiveTab(EditorTab tab) {
+        if (tab == null || tab.draft == null) return false;
+        Path target = tab.file.toPath();
+        Path temp = null;
+        try {
+            if (tab.draft.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
+                throw new IOException("肖邪泄谢 锌褉械胁褘褕邪械褌 芯谐褉邪薪懈褔械薪懈械 1 袦袘");
+            }
+            if (isBinaryFile(tab.file)) throw new IOException("袘懈薪邪褉薪褘泄 褎邪泄谢 薪械谢褜蟹褟 褋芯褏褉邪薪褟褌褜");
+            temp = Files.createTempFile(target.getParent(), ".codebox-tab-", ".tmp");
+            Files.write(temp, tab.draft.getBytes(StandardCharsets.UTF_8));
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            tab.saved = tab.draft;
+            toast("肖邪泄谢 褋芯褏褉邪薪褢薪");
+            return true;
+        } catch (IOException e) {
+            toast("袨褕懈斜泻邪 褋芯褏褉邪薪械薪懈褟: " + e.getMessage());
+            return false;
+        } finally {
+            if (temp != null) {
+                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+            }
+        }
+    }
+
+    private void closeTabNow(EditorTab tab) {
+        int index = openTabs.indexOf(tab);
+        if (index < 0 || openTabs.size() <= 1) return;
+        boolean active = tab.file.equals(currentFile);
+        if (active) captureCurrentTab();
+        openTabs.remove(tab);
+        if (active) {
+            int next = Math.min(index, openTabs.size() - 1);
+            switchToTab(openTabs.get(next));
+        } else {
+            refreshTabsBar();
         }
     }
 
@@ -829,6 +1106,7 @@ public class CodeEditorActivity extends Activity {
             statusText.setText(modified ? "鈼� 袠蟹屑械薪褢薪" : "鈼� 小芯褏褉邪薪械薪芯");
             statusText.setTextColor(modified ? 0xFFFFC978 : 0xFF71D7A4);
         }
+        refreshTabsBar();
     }
 
     private void saveFile() {
@@ -847,7 +1125,14 @@ public class CodeEditorActivity extends Activity {
             Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             savedContent = content;
+            EditorTab activeTab = findTab(currentFile);
+            if (activeTab != null) {
+                activeTab.saved = content;
+                activeTab.draft = content;
+                activeTab.cursor = editor.getSelectionStart();
+            }
             updateTitle();
+            refreshTabsBar();
             toast("肖邪泄谢 褋芯褏褉邪薪褢薪");
         } catch (IOException e) { toast("袨褕懈斜泻邪 褋芯褏褉邪薪械薪懈褟: " + e.getMessage()); }
         finally {

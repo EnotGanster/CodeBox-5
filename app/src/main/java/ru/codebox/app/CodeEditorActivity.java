@@ -28,6 +28,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -146,8 +147,8 @@ public class CodeEditorActivity extends Activity {
                 throw new IOException("Проект не найден");
             }
             projectDirectory = project;
-            File file = new File(project, relativePath).getCanonicalFile();
-            if (!file.getPath().startsWith(project.getPath() + File.separator) || !file.isFile()) {
+            File file = resolveSafeProjectFile(relativePath, true);
+            if (!file.isFile()) {
                 throw new IOException("Файл недоступен или вне проекта");
             }
             if (isImageFile(file)) {
@@ -265,6 +266,99 @@ public class CodeEditorActivity extends Activity {
         return false;
     }
 
+    /**
+     * Resolves a project-relative path without following symbolic links.
+     * Every existing path component is checked before the canonical path is accepted.
+     */
+    private File resolveSafeProjectFile(String relativePath, boolean mustExist) throws IOException {
+        if (projectDirectory == null || relativePath == null || relativePath.trim().isEmpty()) {
+            throw new IOException("Путь к файлу не указан");
+        }
+        Path root = projectDirectory.getCanonicalFile().toPath();
+        Path relative = new File(relativePath).toPath();
+        if (relative.isAbsolute()) throw new IOException("Абсолютные пути запрещены");
+
+        Path candidate = root.resolve(relative).normalize();
+        if (!candidate.startsWith(root) || candidate.equals(root)) {
+            throw new IOException("Путь выходит за пределы проекта");
+        }
+
+        Path current = root;
+        Path partPath = root.relativize(candidate);
+        for (Path part : partPath) {
+            current = current.resolve(part);
+            if (Files.isSymbolicLink(current)) {
+                throw new IOException("Символические ссылки в проекте не поддерживаются");
+            }
+        }
+
+        File canonical = candidate.toFile().getCanonicalFile();
+        if (!canonical.toPath().startsWith(root)) {
+            throw new IOException("Файл находится вне проекта");
+        }
+        if (mustExist && !Files.exists(canonical.toPath())) {
+            throw new IOException("Файл не найден");
+        }
+        return canonical;
+    }
+
+    private void verifySafeTarget(File file) throws IOException {
+        if (file == null || projectDirectory == null) {
+            throw new IOException("Файл проекта недоступен");
+        }
+        Path root = projectDirectory.getCanonicalFile().toPath();
+        Path target = file.toPath().toAbsolutePath().normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new IOException("Запись за пределами проекта запрещена");
+        }
+        Path current = root;
+        for (Path part : root.relativize(target)) {
+            current = current.resolve(part);
+            if (Files.isSymbolicLink(current)) {
+                throw new IOException("Запись через символическую ссылку запрещена");
+            }
+        }
+        File canonical = file.getCanonicalFile();
+        if (!canonical.toPath().startsWith(root) || canonical.equals(root.toFile())) {
+            throw new IOException("Файл находится вне проекта");
+        }
+        if (!file.isFile()) throw new IOException("Файл больше не существует");
+    }
+
+    /**
+     * Writes UTF-8 text through a temporary file. Uses atomic replacement where supported
+     * and a regular replacement as a compatibility fallback.
+     */
+    private void writeTextSafely(File file, String content) throws IOException {
+        verifySafeTarget(file);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        if (bytes.length > MAX_FILE_BYTES) {
+            throw new IOException("Файл превышает ограничение 1 МБ");
+        }
+
+        Path target = file.toPath();
+        Path parent = target.getParent();
+        if (parent == null || !Files.isDirectory(parent)) {
+            throw new IOException("Папка файла не найдена");
+        }
+
+        Path temp = null;
+        try {
+            temp = Files.createTempFile(parent, ".codebox-", ".tmp");
+            Files.write(temp, bytes);
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            if (temp != null) {
+                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+            }
+        }
+    }
+
     private void buildEditor() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -374,10 +468,22 @@ public class CodeEditorActivity extends Activity {
     private void openFileFromExplorer(File file) {
         if (file == null || projectDirectory == null) return;
         try {
+            Path rootPath = projectDirectory.getCanonicalFile().toPath();
+            Path selectedPath = file.toPath().toAbsolutePath().normalize();
+            if (!selectedPath.startsWith(rootPath) || selectedPath.equals(rootPath)) {
+                toast("Файл недоступен или находится вне проекта");
+                return;
+            }
+            Path walk = rootPath;
+            for (Path part : rootPath.relativize(selectedPath)) {
+                walk = walk.resolve(part);
+                if (Files.isSymbolicLink(walk)) {
+                    toast("Символические ссылки не поддерживаются");
+                    return;
+                }
+            }
             File canonical = file.getCanonicalFile();
-            String rootPath = projectDirectory.getCanonicalPath();
-            if (!canonical.getPath().startsWith(rootPath + File.separator)
-                    || !canonical.isFile()) {
+            if (!canonical.toPath().startsWith(rootPath) || !canonical.isFile()) {
                 toast("Файл недоступен или находится вне проекта");
                 return;
             }
@@ -614,27 +720,14 @@ public class CodeEditorActivity extends Activity {
 
     private boolean saveInactiveTab(EditorTab tab) {
         if (tab == null || tab.draft == null) return false;
-        Path target = tab.file.toPath();
-        Path temp = null;
         try {
-            if (tab.draft.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
-                throw new IOException("Файл превышает ограничение 1 МБ");
-            }
-            if (isBinaryFile(tab.file)) throw new IOException("Бинарный файл нельзя сохранять");
-            temp = Files.createTempFile(target.getParent(), ".codebox-tab-", ".tmp");
-            Files.write(temp, tab.draft.getBytes(StandardCharsets.UTF_8));
-            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING);
+            writeTextSafely(tab.file, tab.draft);
             tab.saved = tab.draft;
             toast("Файл сохранён");
             return true;
         } catch (IOException e) {
             toast("Ошибка сохранения: " + e.getMessage());
             return false;
-        } finally {
-            if (temp != null) {
-                try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
-            }
         }
     }
 
@@ -1166,19 +1259,16 @@ public class CodeEditorActivity extends Activity {
 
     private void saveFile() {
         if (editor == null || currentFile == null) return;
-        if (isImageFile(currentFile)) { toast("Нельзя сохранять изображение как текст"); return; }
-        String content = editor.getText().toString();
-        if (content.getBytes(StandardCharsets.UTF_8).length > MAX_FILE_BYTES) {
-            toast("Файл превышает ограничение 1 МБ");
+        if (isImageFile(currentFile)) {
+            toast("Нельзя сохранять изображение как текст");
             return;
         }
-        Path target = currentFile.toPath();
-        Path temp = null;
+        String content = editor.getText().toString();
         try {
-            if (isBinaryFile(currentFile)) throw new IOException("Сохранение бинарного файла запрещено");
-            temp = Files.createTempFile(target.getParent(), ".codebox-", ".tmp");
-            Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
-            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            if (isBinaryFile(currentFile)) {
+                throw new IOException("Сохранение бинарного файла запрещено");
+            }
+            writeTextSafely(currentFile, content);
             savedContent = content;
             EditorTab activeTab = findTab(currentFile);
             if (activeTab != null) {
@@ -1189,19 +1279,54 @@ public class CodeEditorActivity extends Activity {
             updateTitle();
             refreshTabsBar();
             toast("Файл сохранён");
-        } catch (IOException e) { toast("Ошибка сохранения: " + e.getMessage()); }
-        finally {
-            if (temp != null) try { Files.deleteIfExists(temp); } catch (IOException ignored) { }
+        } catch (IOException e) {
+            toast("Ошибка сохранения: " + e.getMessage());
         }
     }
 
+    private boolean hasAnyUnsavedChanges() {
+        captureCurrentTab();
+        for (EditorTab tab : openTabs) {
+            if (tab != null && tab.draft != null && !tab.draft.equals(tab.saved)) return true;
+        }
+        return false;
+    }
+
+    private boolean saveAllOpenTabs() {
+        captureCurrentTab();
+        for (EditorTab tab : openTabs) {
+            if (tab == null || tab.draft == null || tab.draft.equals(tab.saved)) continue;
+            try {
+                if (isBinaryFile(tab.file)) {
+                    throw new IOException("Бинарный файл нельзя сохранять");
+                }
+                writeTextSafely(tab.file, tab.draft);
+                tab.saved = tab.draft;
+            } catch (IOException e) {
+                toast("Не удалось сохранить " + tab.file.getName() + ": " + e.getMessage());
+                return false;
+            }
+        }
+        EditorTab active = findTab(currentFile);
+        if (active != null) {
+            savedContent = active.saved;
+            if (editor != null) active.cursor = editor.getSelectionStart();
+        }
+        updateTitle();
+        refreshTabsBar();
+        toast("Все открытые файлы сохранены");
+        return true;
+    }
+
     private void attemptExit(boolean goHome) {
-        if (!hasUnsavedChanges()) { navigateAway(goHome); return; }
+        if (!hasAnyUnsavedChanges()) {
+            navigateAway(goHome);
+            return;
+        }
         new AlertDialog.Builder(this).setTitle("Несохранённые изменения")
-                .setMessage("Сохранить изменения перед выходом?")
-                .setPositiveButton("Сохранить", (d, w) -> {
-                    saveFile();
-                    if (!hasUnsavedChanges()) navigateAway(goHome);
+                .setMessage("Сохранить изменения во всех открытых вкладках перед выходом?")
+                .setPositiveButton("Сохранить все", (d, w) -> {
+                    if (saveAllOpenTabs()) navigateAway(goHome);
                 })
                 .setNegativeButton("Не сохранять", (d, w) -> navigateAway(goHome))
                 .setNeutralButton("Отмена", null).show();
@@ -1263,4 +1388,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-                    }
+            }

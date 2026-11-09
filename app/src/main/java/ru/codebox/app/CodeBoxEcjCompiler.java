@@ -12,6 +12,9 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.io.FileOutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * CodeBox 5 — ECJ Java Compiler.
@@ -118,6 +121,21 @@ public final class CodeBoxEcjCompiler {
 
         File cacheRoot =
                 context.getCacheDir().getCanonicalFile();
+
+        File librariesDirectory = new File(project, "app/libs").getCanonicalFile();
+        if (!inside(project, librariesDirectory)) {
+            throw new IOException("Недопустимый каталог app/libs");
+        }
+        File aarCache = new File(
+                cacheRoot, "ecj-aar-libs-" + project.getName()
+        ).getCanonicalFile();
+        if (!inside(cacheRoot, aarCache) || aarCache.equals(cacheRoot)) {
+            throw new IOException("Недопустимый каталог AAR-кэша");
+        }
+        prepareAarLibraries(librariesDirectory, aarCache);
+        List<File> dependencyJars = collectLibraryJars(
+                librariesDirectory, aarCache
+        );
 
         File output = new File(
                 cacheRoot,
@@ -298,7 +316,11 @@ public final class CodeBoxEcjCompiler {
         // Android classes for project compilation.
 
         arguments.add("-classpath");
-        arguments.add(androidJar.getAbsolutePath());
+        StringBuilder classpath = new StringBuilder(androidJar.getAbsolutePath());
+        for (File libraryJar : dependencyJars) {
+            classpath.append(File.pathSeparator).append(libraryJar.getAbsolutePath());
+        }
+        arguments.add(classpath.toString());
 
         // Output directory for .class files.
 
@@ -325,7 +347,10 @@ public final class CodeBoxEcjCompiler {
                 .append('\n');
 
         log.append("Classpath: ")
-                .append(androidJar.getAbsolutePath())
+                .append(classpath)
+                .append('\n');
+        log.append("Локальных JAR/AAR-библиотек: ")
+                .append(dependencyJars.size())
                 .append('\n');
 
         log.append("Output: ")
@@ -457,6 +482,117 @@ public final class CodeBoxEcjCompiler {
                 log.toString(),
                 output
         );
+    }
+
+
+    private static List<File> collectLibraryJars(
+            File librariesDirectory, File aarCache) throws IOException {
+        List<File> result = new ArrayList<>();
+        if (librariesDirectory.exists()) {
+            if (!librariesDirectory.isDirectory()) {
+                throw new IOException("app/libs должен быть папкой");
+            }
+            File[] files = librariesDirectory.listFiles();
+            if (files == null) throw new IOException("Не удалось прочитать app/libs");
+            for (File file : files) {
+                File canonical = file.getCanonicalFile();
+                if (!inside(librariesDirectory, canonical)) {
+                    throw new IOException("Библиотека выходит за пределы app/libs");
+                }
+                if (canonical.isFile() && canonical.getName().toLowerCase(
+                        java.util.Locale.ROOT).endsWith(".jar")
+                        && canonical.length() > 0) result.add(canonical);
+            }
+        }
+        if (aarCache.isDirectory()) collectJarFiles(aarCache, aarCache, result);
+        Collections.sort(result, (a, b) ->
+                a.getAbsolutePath().compareToIgnoreCase(b.getAbsolutePath()));
+        return result;
+    }
+
+    private static void collectJarFiles(
+            File root, File directory, List<File> output) throws IOException {
+        File[] files = directory.listFiles();
+        if (files == null) throw new IOException("Не удалось прочитать AAR-кэш");
+        for (File file : files) {
+            File canonical = file.getCanonicalFile();
+            if (!inside(root, canonical)) throw new IOException("Недопустимый путь в AAR-кэше");
+            if (canonical.isDirectory()) collectJarFiles(root, canonical, output);
+            else if (canonical.isFile() && canonical.getName().toLowerCase(
+                    java.util.Locale.ROOT).endsWith(".jar") && canonical.length() > 0) {
+                output.add(canonical);
+            }
+        }
+    }
+
+    private static void prepareAarLibraries(
+            File librariesDirectory, File aarCache) throws IOException {
+        if (!librariesDirectory.exists()) {
+            deleteTree(aarCache);
+            return;
+        }
+        if (!librariesDirectory.isDirectory()) throw new IOException("app/libs должен быть папкой");
+        deleteTree(aarCache);
+        if (!aarCache.mkdirs()) throw new IOException("Не удалось создать AAR-кэш");
+
+        File[] files = librariesDirectory.listFiles();
+        if (files == null) throw new IOException("Не удалось прочитать app/libs");
+        byte[] buffer = new byte[32768];
+        long total = 0;
+        final long maxTotal = 200L * 1024L * 1024L;
+        final long maxEntry = 100L * 1024L * 1024L;
+
+        for (File aar : files) {
+            File canonical = aar.getCanonicalFile();
+            if (!inside(librariesDirectory, canonical) || !canonical.isFile()
+                    || !canonical.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".aar")) {
+                continue;
+            }
+            String safeName = canonical.getName().replaceAll("[^A-Za-z0-9._-]", "_");
+            File destination = new File(aarCache, safeName).getCanonicalFile();
+            if (!inside(aarCache, destination) || !destination.mkdirs()) {
+                throw new IOException("Не удалось создать каталог AAR");
+            }
+
+            try (ZipInputStream zip = new ZipInputStream(
+                    new java.io.BufferedInputStream(new java.io.FileInputStream(canonical)))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    String name = entry.getName();
+                    boolean wanted = "classes.jar".equals(name)
+                            || (name.startsWith("libs/") && name.endsWith(".jar")
+                            && !name.contains("..") && !name.contains("\\\\"));
+                    if (!wanted || entry.isDirectory()) {
+                        zip.closeEntry();
+                        continue;
+                    }
+                    File out = new File(destination, name).getCanonicalFile();
+                    if (!inside(destination, out)) throw new IOException("Недопустимый путь внутри AAR");
+                    File parent = out.getParentFile();
+                    if (!parent.isDirectory() && !parent.mkdirs()) {
+                        throw new IOException("Не удалось создать папку AAR");
+                    }
+                    long entrySize = 0;
+                    try (FileOutputStream output = new FileOutputStream(out)) {
+                        int count;
+                        while ((count = zip.read(buffer)) != -1) {
+                            entrySize += count;
+                            total += count;
+                            if (entrySize > maxEntry || total > maxTotal) {
+                                throw new IOException("AAR превышает лимит распаковки");
+                            }
+                            output.write(buffer, 0, count);
+                        }
+                        output.flush();
+                    }
+                    if (entrySize == 0) out.delete();
+                    zip.closeEntry();
+                }
+            } catch (IOException e) {
+                throw new IOException("Ошибка чтения AAR " + canonical.getName()
+                        + ": " + e.getMessage(), e);
+            }
+        }
     }
 
     private static void appendThrowable(

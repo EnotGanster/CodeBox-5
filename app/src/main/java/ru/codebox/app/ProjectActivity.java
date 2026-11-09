@@ -33,12 +33,15 @@ public class ProjectActivity extends Activity
 
     private static final int PICK_IMAGE = 501;
     private static final int PICK_ZIP_PROJECT = 502;
+    private static final int PICK_LIBRARY = 504;
+    private static final long MAX_LIBRARY_BYTES = 100L * 1024 * 1024;
     private static final int MAX_ZIP_ENTRIES = 5000;
     private static final long MAX_ZIP_TOTAL_BYTES = 200L * 1024 * 1024;
     private static final long MAX_ZIP_ENTRY_BYTES = 50L * 1024 * 1024;
     private static final int MENU_LIBRARY = 601;
     private static final int MENU_CHECK_PROJECT = 602;
     private static final int MENU_BUILD = 603;
+    private static final int MENU_IMPORT_LIBRARY = 604;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -85,6 +88,8 @@ public class ProjectActivity extends Activity
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         menu.add(Menu.NONE, MENU_CHECK_PROJECT, Menu.NONE, "🔎 Проверить проект")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(Menu.NONE, MENU_IMPORT_LIBRARY, Menu.NONE, "📦 Импорт JAR / AAR")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
 
@@ -100,6 +105,10 @@ public class ProjectActivity extends Activity
         }
         if (item.getItemId() == MENU_CHECK_PROJECT) {
             checkProject();
+            return true;
+        }
+        if (item.getItemId() == MENU_IMPORT_LIBRARY) {
+            pickLibrary();
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -385,6 +394,144 @@ public class ProjectActivity extends Activity
             importImage(data.getData());
         } else if (requestCode == PICK_ZIP_PROJECT) {
             importZipProject(data.getData());
+        } else if (requestCode == PICK_LIBRARY) {
+            importLibrary(data.getData());
+        }
+    }
+
+    /**
+     * Opens the Android document picker for a local JAR or AAR library.
+     * The selected file is copied into this project's app/libs directory.
+     */
+    private void pickLibrary() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/java-archive",
+                "application/zip",
+                "application/octet-stream"
+        });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, PICK_LIBRARY);
+        } catch (Exception e) {
+            error("Не удалось открыть выбор библиотеки: " + message(e));
+        }
+    }
+
+    private void importLibrary(Uri uri) {
+        File destination = null;
+        File temporary = null;
+        try {
+            if (projectDirectory == null || !projectDirectory.isDirectory()) {
+                throw new IOException("Проект недоступен");
+            }
+
+            String originalName = null;
+            try (Cursor cursor = getContentResolver().query(
+                    uri,
+                    new String[]{OpenableColumns.DISPLAY_NAME},
+                    null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    originalName = cursor.getString(0);
+                }
+            }
+
+            if (originalName == null || originalName.trim().isEmpty()) {
+                throw new IOException("Не удалось определить имя библиотеки");
+            }
+
+            originalName = originalName.trim();
+            String lowerName = originalName.toLowerCase(Locale.ROOT);
+            if (!lowerName.endsWith(".jar") && !lowerName.endsWith(".aar")) {
+                throw new IOException("Поддерживаются только файлы JAR и AAR");
+            }
+
+            // Keep the original extension, but remove path separators and control characters.
+            String safeName = originalName.replaceAll(
+                    "[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+            if (safeName.isEmpty() || safeName.equals(".") || safeName.equals("..")) {
+                throw new IOException("Некорректное имя библиотеки");
+            }
+            if (safeName.length() > 120) {
+                String extension = lowerName.endsWith(".aar") ? ".aar" : ".jar";
+                safeName = safeName.substring(0, 120 - extension.length()) + extension;
+            }
+
+            File libsDirectory = new File(projectDirectory, "app/libs").getCanonicalFile();
+            File appDirectory = new File(projectDirectory, "app").getCanonicalFile();
+            if (!appDirectory.equals(libsDirectory.getParentFile())
+                    || !inside(libsDirectory)) {
+                throw new IOException("Недопустимый каталог app/libs");
+            }
+            if (!libsDirectory.exists() && !libsDirectory.mkdirs()) {
+                throw new IOException("Не удалось создать app/libs");
+            }
+            if (!libsDirectory.isDirectory()) {
+                throw new IOException("app/libs не является папкой");
+            }
+
+            String baseName = safeName;
+            int dot = safeName.lastIndexOf('.');
+            String stem = dot > 0 ? safeName.substring(0, dot) : safeName;
+            String extension = dot > 0 ? safeName.substring(dot) : "";
+            for (int i = 0; i < 10000; i++) {
+                String candidateName = i == 0
+                        ? baseName : stem + "_" + i + extension;
+                File candidate = new File(libsDirectory, candidateName).getCanonicalFile();
+                if (!inside(candidate) || !libsDirectory.equals(candidate.getParentFile())) {
+                    throw new IOException("Недопустимое имя библиотеки");
+                }
+                if (!candidate.exists()) {
+                    destination = candidate;
+                    break;
+                }
+            }
+            if (destination == null) {
+                throw new IOException("Не удалось подобрать имя для библиотеки");
+            }
+
+            temporary = File.createTempFile(".codebox-library-", ".tmp", libsDirectory);
+            long copied = 0;
+            try (InputStream input = getContentResolver().openInputStream(uri);
+                 FileOutputStream output = new FileOutputStream(temporary)) {
+                if (input == null) {
+                    throw new IOException("Выбранный файл недоступен");
+                }
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    copied += count;
+                    if (copied > MAX_LIBRARY_BYTES) {
+                        throw new IOException("Размер библиотеки превышает 100 МБ");
+                    }
+                    output.write(buffer, 0, count);
+                }
+                output.getFD().sync();
+            }
+
+            if (copied == 0) {
+                throw new IOException("Файл библиотеки пуст");
+            }
+            if (!temporary.renameTo(destination)) {
+                throw new IOException("Не удалось сохранить библиотеку в app/libs");
+            }
+            temporary = null;
+
+            Toast.makeText(
+                    this,
+                    "Библиотека добавлена: " + destination.getName(),
+                    Toast.LENGTH_LONG
+            ).show();
+            refreshFiles();
+        } catch (Exception e) {
+            error("Ошибка импорта библиотеки: " + message(e));
+        } finally {
+            if (temporary != null && temporary.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                temporary.delete();
+            }
         }
     }
 

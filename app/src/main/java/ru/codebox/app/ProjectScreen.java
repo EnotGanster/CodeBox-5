@@ -124,14 +124,43 @@ public final class ProjectScreen {
                 .setItems(new String[]{
                         "🔨 Проверить проект",
                         "📚 Библиотека кода и Gradle",
-                        "📦 Импортировать ZIP-проект"
+                        "📦 Импортировать ZIP-проект",
+                        "🧩 Импортировать JAR / AAR"
                 }, (dialog, which) -> {
-                    if (which == 0) checkProject();
-                    else if (which == 1) openCodeLibrary();
-                    else listener.onImportZip();
+                    if (which == 0) {
+                        checkProject();
+                    } else if (which == 1) {
+                        openCodeLibrary();
+                    } else if (which == 2) {
+                        listener.onImportZip();
+                    } else if (which == 3) {
+                        pickLibraryFile();
+                    }
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    /**
+     * Starts the document picker in the hosting Activity.
+     * ProjectActivity handles request code 504 and safely copies the selected
+     * JAR/AAR into this project's app/libs directory.
+     */
+    private void pickLibraryFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                "application/java-archive",
+                "application/zip",
+                "application/octet-stream"
+        });
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            activity.startActivityForResult(intent, 504);
+        } catch (Exception e) {
+            toast("Не удалось открыть выбор библиотеки: " + e.getMessage());
+        }
     }
 
     private void checkProject() {
@@ -358,4 +387,4 @@ public final class ProjectScreen {
             return true;
         });
     }
-            }
+    }

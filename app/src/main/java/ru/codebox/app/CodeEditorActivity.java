@@ -43,6 +43,7 @@ public class CodeEditorActivity extends Activity {
     private static final int PANEL_BG = 0xFF242635;
     private static final int MAX_FILE_BYTES = 1024 * 1024;
     private static final int REQUEST_EXPORT_TEXT = 7127;
+    private static final int REQUEST_IMPORT_TEXT = 7128;
     private static final String[] JAVA_WORDS = {
             // Java keywords and literals
             "abstract", "assert", "boolean", "break", "byte", "case", "catch",
@@ -967,6 +968,13 @@ public class CodeEditorActivity extends Activity {
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(snippets, CodeBoxTheme.PURPLE);
 
+        TextView importText = text("⇧ Импорт TXT", 12, true);
+        importText.setGravity(Gravity.CENTER);
+        importText.setSingleLine(true);
+        importText.setAutoSizeTextTypeUniformWithConfiguration(9, 12, 1,
+                android.util.TypedValue.COMPLEX_UNIT_SP);
+        CodeBoxTheme.styleColoredButton(importText, CodeBoxTheme.PURPLE);
+
         TextView export = text("⇩ Экспорт TXT", 12, true);
         export.setGravity(Gravity.CENTER);
         export.setSingleLine(true);
@@ -974,15 +982,20 @@ public class CodeEditorActivity extends Activity {
                 android.util.TypedValue.COMPLEX_UNIT_SP);
         CodeBoxTheme.styleColoredButton(export, CodeBoxTheme.PURPLE);
 
-        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, dp(38), 1);
-        left.rightMargin = dp(4);
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(38), 1);
-        right.leftMargin = dp(4);
-        wrapper.addView(snippets, left);
-        wrapper.addView(export, right);
+        LinearLayout.LayoutParams first = new LinearLayout.LayoutParams(0, dp(38), 1);
+        first.rightMargin = dp(3);
+        LinearLayout.LayoutParams middle = new LinearLayout.LayoutParams(0, dp(38), 1);
+        middle.leftMargin = dp(3);
+        middle.rightMargin = dp(3);
+        LinearLayout.LayoutParams last = new LinearLayout.LayoutParams(0, dp(38), 1);
+        last.leftMargin = dp(3);
+        wrapper.addView(snippets, first);
+        wrapper.addView(importText, middle);
+        wrapper.addView(export, last);
         root.addView(wrapper);
 
         snippets.setOnClickListener(v -> showSnippetPicker());
+        importText.setOnClickListener(v -> importTextIntoCurrentFile());
         export.setOnClickListener(v -> exportCurrentText());
     }
 
@@ -1001,6 +1014,14 @@ public class CodeEditorActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQUEST_IMPORT_TEXT) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                handleImportedText(data.getData());
+            }
+            return;
+        }
+
         if (requestCode != REQUEST_EXPORT_TEXT || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
         try (java.io.OutputStream output = getContentResolver().openOutputStream(data.getData(), "wt")) {
@@ -1012,6 +1033,128 @@ public class CodeEditorActivity extends Activity {
         } catch (IOException e) {
             toast("Ошибка экспорта: " + e.getMessage());
         }
+    }
+
+    /**
+     * Opens a TXT document from Downloads or another Android document provider.
+     * The imported text replaces the current editor draft; the user saves it
+     * to the currently open project file with the normal Save button.
+     */
+    private void importTextIntoCurrentFile() {
+        if (editor == null || currentFile == null || projectDirectory == null) {
+            toast("Сначала откройте файл проекта");
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[]{"text/plain", "text/*", "application/octet-stream"});
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_TEXT);
+        } catch (android.content.ActivityNotFoundException e) {
+            toast("Не найден проводник для выбора TXT");
+        }
+    }
+
+    private void handleImportedText(android.net.Uri uri) {
+        if (uri == null || editor == null) return;
+
+        final String importedText;
+        try {
+            importedText = readImportedText(uri);
+        } catch (IOException e) {
+            toast("Не удалось импортировать TXT: " + e.getMessage());
+            return;
+        }
+
+        if (hasUnsavedChanges()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Заменить содержимое файла?")
+                    .setMessage("Импортированный TXT заменит текущий текст в редакторе. "
+                            + "Исходный файл проекта изменится только после нажатия «Сохранить».")
+                    .setPositiveButton("Импортировать", (dialog, which) ->
+                            applyImportedText(importedText))
+                    .setNegativeButton("Отмена", null)
+                    .show();
+        } else {
+            applyImportedText(importedText);
+        }
+    }
+
+    private String readImportedText(android.net.Uri uri) throws IOException {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.io.InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Проводник не предоставил доступ к файлу");
+            }
+
+            byte[] chunk = new byte[8192];
+            int total = 0;
+            int count;
+            while ((count = input.read(chunk)) != -1) {
+                total += count;
+                if (total > MAX_FILE_BYTES) {
+                    throw new IOException("TXT превышает ограничение 1 МБ");
+                }
+                buffer.write(chunk, 0, count);
+            }
+        }
+
+        byte[] bytes = buffer.toByteArray();
+        int offset = 0;
+        java.nio.charset.Charset charset = StandardCharsets.UTF_8;
+
+        // Detect common Unicode byte-order marks before decoding.
+        if (bytes.length >= 3
+                && (bytes[0] & 0xFF) == 0xEF
+                && (bytes[1] & 0xFF) == 0xBB
+                && (bytes[2] & 0xFF) == 0xBF) {
+            offset = 3;
+        } else if (bytes.length >= 2
+                && (bytes[0] & 0xFF) == 0xFF
+                && (bytes[1] & 0xFF) == 0xFE) {
+            charset = StandardCharsets.UTF_16LE;
+            offset = 2;
+        } else if (bytes.length >= 2
+                && (bytes[0] & 0xFF) == 0xFE
+                && (bytes[1] & 0xFF) == 0xFF) {
+            charset = StandardCharsets.UTF_16BE;
+            offset = 2;
+        } else {
+            for (byte value : bytes) {
+                if (value == 0) {
+                    throw new IOException("Выбранный файл похож на бинарный, а не на TXT");
+                }
+            }
+        }
+
+        String result = new String(bytes, offset, bytes.length - offset, charset);
+        if (result.indexOf('\u0000') >= 0) {
+            throw new IOException("В TXT обнаружены нулевые символы");
+        }
+        return result;
+    }
+
+    private void applyImportedText(String importedText) {
+        if (editor == null || importedText == null) return;
+
+        internalEdit = true;
+        try {
+            editor.setText(importedText);
+            editor.setSelection(editor.length());
+        } finally {
+            internalEdit = false;
+        }
+
+        updateTitle();
+        scheduleHighlight();
+        captureCurrentTab();
+        updateHistoryButtons();
+        toast("TXT загружен. Нажмите «Сохранить», чтобы записать его в проект.");
     }
 
     private void createEditorArea(LinearLayout root) {
@@ -1448,4 +1591,4 @@ public class CodeEditorActivity extends Activity {
             canvas.drawText(String.valueOf(number), getPaddingLeft() - dp(12), y, linePaint);
         }
     }
-            }
+                }

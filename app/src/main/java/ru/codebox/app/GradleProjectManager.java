@@ -12,7 +12,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class GradleProjectManager {
@@ -24,11 +23,6 @@ public final class GradleProjectManager {
                     "[A-Za-z0-9_.-]+:"
                     + "[A-Za-z0-9_.-]+:"
                     + "[A-Za-z0-9_.+\\-]+"
-            );
-
-    private static final Pattern DEPENDENCIES_BLOCK =
-            Pattern.compile(
-                    "(?m)^[ \\t]*dependencies[ \\t]*\\{"
             );
 
     public GradleProjectManager(Context context)
@@ -333,23 +327,7 @@ public final class GradleProjectManager {
             return 0;
         }
 
-        Matcher matcher =
-                DEPENDENCIES_BLOCK.matcher(result);
-
-        int opening = -1;
-
-        while (matcher.find()) {
-            if (opening >= 0) {
-                throw new IOException(
-                        "Найдено несколько блоков "
-                        + "dependencies"
-                );
-            }
-
-            opening = result.indexOf(
-                    '{', matcher.start()
-            );
-        }
+        int opening = findDependenciesBlock(result);
 
         if (opening < 0) {
 
@@ -404,6 +382,118 @@ public final class GradleProjectManager {
         );
 
         return pattern.matcher(text).find();
+    }
+
+    /**
+     * Finds a top-level Groovy dependencies block.
+     * Text inside comments and quoted strings is ignored, so a sample
+     * string or commented-out snippet cannot be mistaken for real Gradle code.
+     * Returns -1 when the block is absent and throws when it is ambiguous.
+     */
+    private int findDependenciesBlock(String text) throws IOException {
+        int depth = 0;
+        int found = -1;
+        boolean singleQuote = false;
+        boolean doubleQuote = false;
+        boolean lineComment = false;
+        boolean blockComment = false;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            char next = i + 1 < text.length()
+                    ? text.charAt(i + 1) : '\0';
+
+            if (lineComment) {
+                if (c == '\n') lineComment = false;
+                continue;
+            }
+            if (blockComment) {
+                if (c == '*' && next == '/') {
+                    blockComment = false;
+                    i++;
+                }
+                continue;
+            }
+
+            if (!singleQuote && !doubleQuote) {
+                if (c == '/' && next == '/') {
+                    lineComment = true;
+                    i++;
+                    continue;
+                }
+                if (c == '/' && next == '*') {
+                    blockComment = true;
+                    i++;
+                    continue;
+                }
+            }
+
+            if (c == '\\' && (singleQuote || doubleQuote)) {
+                i++;
+                continue;
+            }
+            if (c == '\'' && !doubleQuote) {
+                singleQuote = !singleQuote;
+                continue;
+            }
+            if (c == '"' && !singleQuote) {
+                doubleQuote = !doubleQuote;
+                continue;
+            }
+            if (singleQuote || doubleQuote) continue;
+
+            if (depth == 0 && isDependenciesKeyword(text, i)) {
+                int j = i + "dependencies".length();
+                while (j < text.length()
+                        && Character.isWhitespace(text.charAt(j))) {
+                    j++;
+                }
+                if (j < text.length() && text.charAt(j) == '{') {
+                    if (found >= 0) {
+                        throw new IOException(
+                                "Найдено несколько блоков dependencies. "
+                                + "Исправь app/build.gradle вручную."
+                        );
+                    }
+                    found = j;
+                }
+            }
+
+            if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth < 0) {
+                    throw new IOException(
+                            "Нарушен баланс фигурных скобок в build.gradle"
+                    );
+                }
+            }
+        }
+
+        if (singleQuote || doubleQuote || blockComment || depth != 0) {
+            throw new IOException(
+                    "Не удалось безопасно разобрать build.gradle: "
+                    + "проверь кавычки, комментарии и фигурные скобки."
+            );
+        }
+        return found;
+    }
+
+    private boolean isDependenciesKeyword(String text, int index) {
+        String keyword = "dependencies";
+        if (index + keyword.length() > text.length()
+                || !text.regionMatches(index, keyword, 0, keyword.length())) {
+            return false;
+        }
+
+        boolean leftBoundary = index == 0
+                || !Character.isJavaIdentifierPart(text.charAt(index - 1));
+        int end = index + keyword.length();
+        boolean rightBoundary = end >= text.length()
+                || !Character.isJavaIdentifierPart(text.charAt(end));
+
+        return leftBoundary && rightBoundary;
     }
 
     private boolean bracesBalanced(String text) {

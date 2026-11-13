@@ -1,3 +1,4 @@
+
 package ru.codebox.app;
 
 import android.app.Activity;
@@ -34,10 +35,17 @@ public class ProjectActivity extends Activity
     private static final int PICK_IMAGE = 501;
     private static final int PICK_ZIP_PROJECT = 502;
     private static final int PICK_LIBRARY = 504;
-    private static final long MAX_LIBRARY_BYTES = 100L * 1024 * 1024;
+
+    private static final long MAX_LIBRARY_BYTES =
+            100L * 1024 * 1024;
     private static final int MAX_ZIP_ENTRIES = 5000;
-    private static final long MAX_ZIP_TOTAL_BYTES = 200L * 1024 * 1024;
-    private static final long MAX_ZIP_ENTRY_BYTES = 50L * 1024 * 1024;
+    private static final long MAX_ZIP_TOTAL_BYTES =
+            200L * 1024 * 1024;
+    private static final long MAX_ZIP_ENTRY_BYTES =
+            50L * 1024 * 1024;
+
+    private static final int MAX_AUTO_FOLDER_DEPTH = 40;
+
     private static final int MENU_LIBRARY = 601;
     private static final int MENU_CHECK_PROJECT = 602;
     private static final int MENU_BUILD = 603;
@@ -53,21 +61,29 @@ public class ProjectActivity extends Activity
         super.onCreate(state);
 
         String name = getIntent().getStringExtra("project_name");
-        if (name == null || !name.matches("[A-Za-z][A-Za-z0-9_]{0,49}")) {
+
+        if (name == null ||
+                !name.matches("[A-Za-z][A-Za-z0-9_]{0,49}")) {
             error("Неверное имя проекта");
             finish();
             return;
         }
 
         try {
-            File projects = new File(getFilesDir(), "projects").getCanonicalFile();
-            projectDirectory = new File(projects, name).getCanonicalFile();
+            File projects = new File(
+                    getFilesDir(), "projects").getCanonicalFile();
+
+            projectDirectory = new File(
+                    projects, name).getCanonicalFile();
+
             if (!projectDirectory.getParentFile().equals(projects)
                     || !projectDirectory.isDirectory()) {
                 throw new IOException("Проект не найден");
             }
+
             fileManager = new ProjectFileManager(projectDirectory);
             currentDirectory = projectDirectory;
+
         } catch (IOException e) {
             error(message(e));
             finish();
@@ -75,21 +91,33 @@ public class ProjectActivity extends Activity
         }
 
         projectScreen = new ProjectScreen(this, this);
-        setContentView(projectScreen.create(projectDirectory.getName()));
+
+        setContentView(
+                projectScreen.create(projectDirectory.getName()));
+
         refreshFiles();
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         super.onCreateOptionsMenu(menu);
-        menu.add(Menu.NONE, MENU_LIBRARY, Menu.NONE, "📚 Библиотека кода")
+
+        menu.add(Menu.NONE, MENU_LIBRARY, Menu.NONE,
+                "📚 Библиотека кода")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(Menu.NONE, MENU_BUILD, Menu.NONE, "🔨 Собрать APK / AAB")
+
+        menu.add(Menu.NONE, MENU_BUILD, Menu.NONE,
+                "🔨 Собрать APK / AAB")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(Menu.NONE, MENU_CHECK_PROJECT, Menu.NONE, "🔎 Проверить проект")
+
+        menu.add(Menu.NONE, MENU_CHECK_PROJECT, Menu.NONE,
+                "🔎 Проверить проект")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(Menu.NONE, MENU_IMPORT_LIBRARY, Menu.NONE, "📦 Импорт JAR / AAR")
+
+        menu.add(Menu.NONE, MENU_IMPORT_LIBRARY, Menu.NONE,
+                "📦 Импорт JAR / AAR")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+
         return true;
     }
 
@@ -99,32 +127,45 @@ public class ProjectActivity extends Activity
             openCodeLibrary();
             return true;
         }
+
         if (item.getItemId() == MENU_BUILD) {
             openBuildScreen();
             return true;
         }
+
         if (item.getItemId() == MENU_CHECK_PROJECT) {
             checkProject();
             return true;
         }
+
         if (item.getItemId() == MENU_IMPORT_LIBRARY) {
             pickLibrary();
             return true;
         }
+
         return super.onOptionsItemSelected(item);
     }
 
-    /** Opens the existing offline APK/AAB build screen for this project. */
     private void openBuildScreen() {
-        if (projectDirectory == null || !projectDirectory.isDirectory()) {
+        if (projectDirectory == null ||
+                !projectDirectory.isDirectory()) {
             error("Проект не выбран или недоступен");
             return;
         }
+
         try {
-            Intent intent = new Intent(this, CodeBoxBuildActivity.class);
-            intent.putExtra("project_name", projectDirectory.getName());
-            intent.putExtra("project_path", projectDirectory.getCanonicalPath());
+            Intent intent = new Intent(
+                    this, CodeBoxBuildActivity.class);
+
+            intent.putExtra(
+                    "project_name", projectDirectory.getName());
+
+            intent.putExtra(
+                    "project_path",
+                    projectDirectory.getCanonicalPath());
+
             startActivity(intent);
+
         } catch (Exception e) {
             error("Не удалось открыть сборку: " + message(e));
         }
@@ -135,13 +176,18 @@ public class ProjectActivity extends Activity
             error("Проект не выбран");
             return;
         }
+
         try {
-            String report = CodeBoxProjectBuildValidator.validate(projectDirectory);
+            String report =
+                    CodeBoxProjectBuildValidator.validate(
+                            projectDirectory);
+
             new AlertDialog.Builder(this)
                     .setTitle("🔨 Проверка Android-проекта")
                     .setMessage(report)
                     .setPositiveButton("Понятно", null)
                     .show();
+
         } catch (IOException e) {
             error("Ошибка проверки: " + message(e));
         }
@@ -152,8 +198,13 @@ public class ProjectActivity extends Activity
             error("Проект не выбран");
             return;
         }
-        Intent intent = new Intent(this, CodeLibraryActivity.class);
-        intent.putExtra("project_name", projectDirectory.getName());
+
+        Intent intent = new Intent(
+                this, CodeLibraryActivity.class);
+
+        intent.putExtra(
+                "project_name", projectDirectory.getName());
+
         try {
             startActivity(intent);
         } catch (Exception e) {
@@ -166,16 +217,20 @@ public class ProjectActivity extends Activity
     }
 
     private String message(Exception e) {
-        return e.getMessage() == null ? "Ошибка файловой системы" : e.getMessage();
+        return e.getMessage() == null
+                ? "Ошибка файловой системы"
+                : e.getMessage();
     }
 
     private void error(String value) {
-        Toast.makeText(this, value, Toast.LENGTH_LONG).show();
+        Toast.makeText(
+                this, value, Toast.LENGTH_LONG).show();
     }
 
     private boolean inside(File file) throws IOException {
         String root = projectDirectory.getCanonicalPath();
         String path = file.getCanonicalPath();
+
         return path.startsWith(root + File.separator);
     }
 
@@ -184,6 +239,7 @@ public class ProjectActivity extends Activity
                 .equals(currentDirectory.getAbsoluteFile())) {
             return false;
         }
+
         return inside(file);
     }
 
@@ -191,68 +247,199 @@ public class ProjectActivity extends Activity
         try {
             String root = projectDirectory.getCanonicalPath();
             String current = currentDirectory.getCanonicalPath();
+
             if (!current.equals(root)
                     && !current.startsWith(root + File.separator)) {
                 currentDirectory = projectDirectory;
                 current = root;
             }
+
             File[] files = currentDirectory.listFiles();
+
             if (files == null) {
                 error("Не удалось открыть папку");
                 return;
             }
+
             Arrays.sort(files, (a, b) -> {
                 if (a.isDirectory() != b.isDirectory()) {
                     return a.isDirectory() ? -1 : 1;
                 }
-                return a.getName().compareToIgnoreCase(b.getName());
+
+                return a.getName().compareToIgnoreCase(
+                        b.getName());
             });
+
             String relative = current.equals(root)
-                    ? "/" : current.substring(root.length());
+                    ? "/"
+                    : current.substring(root.length());
+
             projectScreen.updatePath(relative, files.length);
             projectScreen.showFiles(files);
+
         } catch (IOException e) {
             error(message(e));
         }
     }
 
+    /**
+     * Автоматически проходит цепочку вложенных папок.
+     *
+     * Продолжает переход, только если:
+     * - текущая папка содержит ровно один элемент;
+     * - этот элемент является обычной папкой;
+     * - переход безопасен.
+     *
+     * Останавливается, если:
+     * - найден файл;
+     * - найдено несколько элементов;
+     * - папка пустая;
+     * - достигнут предел глубины.
+     */
+    private void openFolderAutomatically(File selectedFolder) {
+        try {
+            if (!safeEntry(selectedFolder)
+                    || !selectedFolder.isDirectory()
+                    || Files.isSymbolicLink(
+                            selectedFolder.toPath())) {
+                error("Недопустимая папка");
+                return;
+            }
+
+            File target = selectedFolder;
+
+            Set<String> visited = new HashSet<>();
+
+            String root = projectDirectory.getCanonicalPath();
+
+            for (int depth = 0;
+                 depth < MAX_AUTO_FOLDER_DEPTH;
+                 depth++) {
+
+                String canonical = target.getCanonicalPath();
+
+                if (!canonical.startsWith(
+                        root + File.separator)) {
+                    throw new IOException(
+                            "Папка находится вне проекта");
+                }
+
+                if (!visited.add(canonical)) {
+                    throw new IOException(
+                            "Обнаружен цикл вложенных папок");
+                }
+
+                if (Files.isSymbolicLink(target.toPath())) {
+                    throw new IOException(
+                            "Символические ссылки запрещены");
+                }
+
+                File[] children = target.listFiles();
+
+                if (children == null) {
+                    throw new IOException(
+                            "Не удалось прочитать папку");
+                }
+
+                // Останавливаемся, если папка пустая
+                // или в ней несколько элементов.
+                if (children.length != 1) {
+                    break;
+                }
+
+                File child = children[0];
+
+                // Если найден файл, показываем
+                // текущую папку с этим файлом.
+                if (!child.isDirectory()) {
+                    break;
+                }
+
+                if (Files.isSymbolicLink(child.toPath())) {
+                    break;
+                }
+
+                String childPath = child.getCanonicalPath();
+
+                if (!childPath.startsWith(
+                        root + File.separator)) {
+                    break;
+                }
+
+                if (visited.contains(childPath)) {
+                    break;
+                }
+
+                // Продолжаем переход по единственной папке.
+                target = child;
+            }
+
+            currentDirectory = target;
+            refreshFiles();
+
+        } catch (IOException e) {
+            error("Ошибка автоперехода: " + message(e));
+        }
+    }
+
     private void createDialog(boolean folder) {
         EditText input = new EditText(this);
+
         input.setSingleLine(true);
-        input.setHint(folder ? "Например: images" : "Например: Main.java");
+        input.setHint(folder
+                ? "Например: images"
+                : "Например: Main.java");
+
         LinearLayout wrapper = new LinearLayout(this);
-        wrapper.setPadding(dp(24), dp(12), dp(24), dp(8));
+        wrapper.setPadding(
+                dp(24), dp(12), dp(24), dp(8));
         wrapper.addView(input);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(folder ? "Новая папка" : "Новый файл")
+                .setTitle(folder
+                        ? "Новая папка"
+                        : "Новый файл")
                 .setView(wrapper)
                 .setPositiveButton("Создать", null)
                 .setNegativeButton("Отмена", null)
                 .create();
+
         dialog.setOnShowListener(ignored ->
                 dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                         .setOnClickListener(v -> {
-                            String name = input.getText().toString().trim();
+                            String name = input.getText()
+                                    .toString().trim();
+
                             try {
                                 if (folder) {
-                                    fileManager.createFolder(currentDirectory, name);
+                                    fileManager.createFolder(
+                                            currentDirectory, name);
                                 } else {
-                                    fileManager.createFile(currentDirectory, name, "");
+                                    fileManager.createFile(
+                                            currentDirectory,
+                                            name, "");
                                 }
+
                                 dialog.dismiss();
                                 refreshFiles();
+
                             } catch (IOException e) {
                                 input.setError(message(e));
                             }
                         })
         );
+
         dialog.show();
     }
 
     private boolean isImageFile(File file) {
-        String name = file.getName().toLowerCase(Locale.ROOT);
-        return name.endsWith(".png") || name.endsWith(".jpg")
-                || name.endsWith(".jpeg") || name.endsWith(".webp");
+        String name = file.getName()
+                .toLowerCase(Locale.ROOT);
+
+        return name.endsWith(".png")
+                || name.endsWith(".jpg")
+                || name.endsWith(".jpeg")
+                || name.endsWith(".webp");
     }
 
     private void openFile(File file) {
@@ -261,14 +448,26 @@ public class ProjectActivity extends Activity
                 error("Недопустимый файл");
                 return;
             }
-            String relative = file.getCanonicalPath().substring(
-                    projectDirectory.getCanonicalPath().length() + 1);
+
+            String relative = file.getCanonicalPath()
+                    .substring(
+                            projectDirectory.getCanonicalPath()
+                                    .length() + 1);
+
             Intent intent = isImageFile(file)
-                    ? new Intent(this, ImageViewerActivity.class)
-                    : new Intent(this, CodeEditorActivity.class);
-            intent.putExtra("project_name", projectDirectory.getName());
+                    ? new Intent(
+                            this, ImageViewerActivity.class)
+                    : new Intent(
+                            this, CodeEditorActivity.class);
+
+            intent.putExtra(
+                    "project_name",
+                    projectDirectory.getName());
+
             intent.putExtra("file_path", relative);
+
             startActivity(intent);
+
         } catch (IOException e) {
             error(message(e));
         }
@@ -280,17 +479,22 @@ public class ProjectActivity extends Activity
                 error("Объект вне папки проекта");
                 return;
             }
+
             if (!file.exists()) {
                 error("Объект не найден");
                 refreshFiles();
                 return;
             }
+
             new AlertDialog.Builder(this)
                     .setTitle(file.getName())
-                    .setItems(new String[]{"Удалить"},
-                            (dialog, which) -> confirmDelete(file))
+                    .setItems(
+                            new String[]{"Удалить"},
+                            (dialog, which) ->
+                                    confirmDelete(file))
                     .setNegativeButton("Отмена", null)
                     .show();
+
         } catch (IOException e) {
             error(message(e));
         }
@@ -298,70 +502,99 @@ public class ProjectActivity extends Activity
 
     private void confirmDelete(File file) {
         String description = file.isDirectory()
-                ? "Удалить папку «" + file.getName() + "» вместе со всем содержимым?"
+                ? "Удалить папку «" + file.getName()
+                + "» вместе со всем содержимым?"
                 : "Удалить файл «" + file.getName() + "»?";
+
         new AlertDialog.Builder(this)
                 .setTitle("Подтверждение удаления")
-                .setMessage(description + "\n\nОтменить удаление нельзя.")
+                .setMessage(
+                        description
+                                + "\n\nОтменить удаление нельзя.")
                 .setNegativeButton("Отмена", null)
-                .setPositiveButton("Удалить", (dialog, which) -> {
-                    try {
-                        if (!safeEntry(file)) {
-                            throw new IOException("Недопустимый путь");
-                        }
-                        deleteTree(file);
-                        Toast.makeText(this, "Удалено", Toast.LENGTH_SHORT).show();
-                    } catch (IOException e) {
-                        error(message(e));
-                    }
-                    refreshFiles();
-                })
+                .setPositiveButton(
+                        "Удалить",
+                        (dialog, which) -> {
+                            try {
+                                if (!safeEntry(file)) {
+                                    throw new IOException(
+                                            "Недопустимый путь");
+                                }
+
+                                deleteTree(file);
+
+                                Toast.makeText(
+                                        this,
+                                        "Удалено",
+                                        Toast.LENGTH_SHORT).show();
+
+                            } catch (IOException e) {
+                                error(message(e));
+                            }
+
+                            refreshFiles();
+                        })
                 .show();
     }
 
     private void deleteTree(File file) throws IOException {
         if (!inside(file)) {
-            throw new IOException("Удаление вне проекта запрещено");
+            throw new IOException(
+                    "Удаление вне проекта запрещено");
         }
+
         if (Files.isSymbolicLink(file.toPath())) {
-            throw new IOException("Удаление ссылок не поддерживается");
+            throw new IOException(
+                    "Удаление ссылок не поддерживается");
         }
-        if (!Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
+
+        if (!Files.exists(
+                file.toPath(), LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("Объект не существует");
         }
+
         if (file.isDirectory()) {
             File[] children = file.listFiles();
+
             if (children == null) {
-                throw new IOException("Не удалось прочитать папку");
+                throw new IOException(
+                        "Не удалось прочитать папку");
             }
+
             for (File child : children) {
                 deleteTree(child);
             }
         }
+
         Files.delete(file.toPath());
     }
 
     private void showGraphicsMenu() {
         new AlertDialog.Builder(this)
                 .setTitle("Графика")
-                .setItems(new String[]{
-                        "Добавить изображение из галереи",
-                        "Создать рисунок"
-                }, (dialog, which) -> {
-                    if (which == 0) {
-                        pickImage();
-                    } else {
-                        openGraphicsEditor();
-                    }
-                })
+                .setItems(
+                        new String[]{
+                                "Добавить изображение из галереи",
+                                "Создать рисунок"
+                        },
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                pickImage();
+                            } else {
+                                openGraphicsEditor();
+                            }
+                        })
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
     private void pickImage() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        Intent intent = new Intent(
+                Intent.ACTION_OPEN_DOCUMENT);
+
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
+
         try {
             startActivityForResult(intent, PICK_IMAGE);
         } catch (Exception e) {
@@ -370,326 +603,604 @@ public class ProjectActivity extends Activity
     }
 
     private void openGraphicsEditor() {
-        Intent intent = new Intent(this, GraphicsEditorActivity.class);
-        intent.putExtra("project_name", projectDirectory.getName());
+        Intent intent = new Intent(
+                this, GraphicsEditorActivity.class);
+
+        intent.putExtra(
+                "project_name", projectDirectory.getName());
+
         try {
-            String relative = currentDirectory.getCanonicalPath().substring(
-                    projectDirectory.getCanonicalPath().length());
-            intent.putExtra("folder_path",
+            String relative = currentDirectory
+                    .getCanonicalPath()
+                    .substring(
+                            projectDirectory
+                                    .getCanonicalPath().length());
+
+            intent.putExtra(
+                    "folder_path",
                     relative.startsWith(File.separator)
-                            ? relative.substring(1) : relative);
+                            ? relative.substring(1)
+                            : relative);
+
             startActivity(intent);
+
         } catch (IOException e) {
             error(message(e));
         }
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data) {
+
+        super.onActivityResult(
+                requestCode, resultCode, data);
+
+        if (resultCode != RESULT_OK
+                || data == null
+                || data.getData() == null) {
             return;
         }
+
         if (requestCode == PICK_IMAGE) {
             importImage(data.getData());
+
         } else if (requestCode == PICK_ZIP_PROJECT) {
             importZipProject(data.getData());
+
         } else if (requestCode == PICK_LIBRARY) {
             importLibrary(data.getData());
         }
     }
 
-    /**
-     * Opens the Android document picker for a local JAR or AAR library.
-     * The selected file is copied into this project's app/libs directory.
-     */
     private void pickLibrary() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        Intent intent = new Intent(
+                Intent.ACTION_OPEN_DOCUMENT);
+
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                "application/java-archive",
-                "application/zip",
-                "application/octet-stream"
-        });
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        intent.putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                new String[]{
+                        "application/java-archive",
+                        "application/zip",
+                        "application/octet-stream"
+                });
+
+        intent.addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
         try {
             startActivityForResult(intent, PICK_LIBRARY);
         } catch (Exception e) {
-            error("Не удалось открыть выбор библиотеки: " + message(e));
+            error(
+                    "Не удалось открыть выбор библиотеки: "
+                            + message(e));
         }
     }
 
     private void importLibrary(Uri uri) {
         File destination = null;
         File temporary = null;
+
         try {
-            if (projectDirectory == null || !projectDirectory.isDirectory()) {
+            if (projectDirectory == null
+                    || !projectDirectory.isDirectory()) {
                 throw new IOException("Проект недоступен");
             }
 
             String originalName = null;
-            try (Cursor cursor = getContentResolver().query(
-                    uri,
-                    new String[]{OpenableColumns.DISPLAY_NAME},
-                    null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
+
+            try (Cursor cursor =
+                         getContentResolver().query(
+                                 uri,
+                                 new String[]{
+                                         OpenableColumns.DISPLAY_NAME
+                                 },
+                                 null, null, null)) {
+
+                if (cursor != null
+                        && cursor.moveToFirst()) {
                     originalName = cursor.getString(0);
                 }
             }
 
-            if (originalName == null || originalName.trim().isEmpty()) {
-                throw new IOException("Не удалось определить имя библиотеки");
+            if (originalName == null
+                    || originalName.trim().isEmpty()) {
+                throw new IOException(
+                        "Не удалось определить имя библиотеки");
             }
 
             originalName = originalName.trim();
-            String lowerName = originalName.toLowerCase(Locale.ROOT);
-            if (!lowerName.endsWith(".jar") && !lowerName.endsWith(".aar")) {
-                throw new IOException("Поддерживаются только файлы JAR и AAR");
+
+            String lowerName =
+                    originalName.toLowerCase(Locale.ROOT);
+
+            if (!lowerName.endsWith(".jar")
+                    && !lowerName.endsWith(".aar")) {
+                throw new IOException(
+                        "Поддерживаются только файлы JAR и AAR");
             }
 
-            // Keep the original extension, but remove path separators and control characters.
             String safeName = originalName.replaceAll(
                     "[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
-            if (safeName.isEmpty() || safeName.equals(".") || safeName.equals("..")) {
-                throw new IOException("Некорректное имя библиотеки");
-            }
-            if (safeName.length() > 120) {
-                String extension = lowerName.endsWith(".aar") ? ".aar" : ".jar";
-                safeName = safeName.substring(0, 120 - extension.length()) + extension;
+
+            if (safeName.isEmpty()
+                    || safeName.equals(".")
+                    || safeName.equals("..")) {
+                throw new IOException(
+                        "Некорректное имя библиотеки");
             }
 
-            File libsDirectory = new File(projectDirectory, "app/libs").getCanonicalFile();
-            File appDirectory = new File(projectDirectory, "app").getCanonicalFile();
-            if (!appDirectory.equals(libsDirectory.getParentFile())
+            if (safeName.length() > 120) {
+                String extension =
+                        lowerName.endsWith(".aar")
+                                ? ".aar" : ".jar";
+
+                safeName = safeName.substring(
+                        0, 120 - extension.length())
+                        + extension;
+            }
+
+            File libsDirectory = new File(
+                    projectDirectory, "app/libs")
+                    .getCanonicalFile();
+
+            File appDirectory = new File(
+                    projectDirectory, "app")
+                    .getCanonicalFile();
+
+            if (!appDirectory.equals(
+                    libsDirectory.getParentFile())
                     || !inside(libsDirectory)) {
-                throw new IOException("Недопустимый каталог app/libs");
+                throw new IOException(
+                        "Недопустимый каталог app/libs");
             }
-            if (!libsDirectory.exists() && !libsDirectory.mkdirs()) {
-                throw new IOException("Не удалось создать app/libs");
+
+            if (!libsDirectory.exists()
+                    && !libsDirectory.mkdirs()) {
+                throw new IOException(
+                        "Не удалось создать app/libs");
             }
+
             if (!libsDirectory.isDirectory()) {
-                throw new IOException("app/libs не является папкой");
+                throw new IOException(
+                        "app/libs не является папкой");
             }
 
             String baseName = safeName;
             int dot = safeName.lastIndexOf('.');
-            String stem = dot > 0 ? safeName.substring(0, dot) : safeName;
-            String extension = dot > 0 ? safeName.substring(dot) : "";
+
+            String stem = dot > 0
+                    ? safeName.substring(0, dot)
+                    : safeName;
+
+            String extension = dot > 0
+                    ? safeName.substring(dot)
+                    : "";
+
             for (int i = 0; i < 10000; i++) {
                 String candidateName = i == 0
-                        ? baseName : stem + "_" + i + extension;
-                File candidate = new File(libsDirectory, candidateName).getCanonicalFile();
-                if (!inside(candidate) || !libsDirectory.equals(candidate.getParentFile())) {
-                    throw new IOException("Недопустимое имя библиотеки");
+                        ? baseName
+                        : stem + "_" + i + extension;
+
+                File candidate = new File(
+                        libsDirectory, candidateName)
+                        .getCanonicalFile();
+
+                if (!inside(candidate)
+                        || !libsDirectory.equals(
+                                candidate.getParentFile())) {
+                    throw new IOException(
+                            "Недопустимое имя библиотеки");
                 }
+
                 if (!candidate.exists()) {
                     destination = candidate;
                     break;
                 }
             }
+
             if (destination == null) {
-                throw new IOException("Не удалось подобрать имя для библиотеки");
+                throw new IOException(
+                        "Не удалось подобрать имя для библиотеки");
             }
 
-            temporary = File.createTempFile(".codebox-library-", ".tmp", libsDirectory);
+            temporary = File.createTempFile(
+                    ".codebox-library-",
+                    ".tmp",
+                    libsDirectory);
+
             long copied = 0;
-            try (InputStream input = getContentResolver().openInputStream(uri);
-                 FileOutputStream output = new FileOutputStream(temporary)) {
+
+            try (InputStream input =
+                         getContentResolver().openInputStream(uri);
+                 FileOutputStream output =
+                         new FileOutputStream(temporary)) {
+
                 if (input == null) {
-                    throw new IOException("Выбранный файл недоступен");
+                    throw new IOException(
+                            "Выбранный файл недоступен");
                 }
+
                 byte[] buffer = new byte[8192];
                 int count;
+
                 while ((count = input.read(buffer)) != -1) {
                     copied += count;
+
                     if (copied > MAX_LIBRARY_BYTES) {
-                        throw new IOException("Размер библиотеки превышает 100 МБ");
+                        throw new IOException(
+                                "Размер библиотеки превышает 100 МБ");
                     }
+
                     output.write(buffer, 0, count);
                 }
+
                 output.getFD().sync();
             }
 
             if (copied == 0) {
-                throw new IOException("Файл библиотеки пуст");
+                throw new IOException(
+                        "Файл библиотеки пуст");
             }
+
             if (!temporary.renameTo(destination)) {
-                throw new IOException("Не удалось сохранить библиотеку в app/libs");
+                throw new IOException(
+                        "Не удалось сохранить библиотеку в app/libs");
             }
+
             temporary = null;
 
             Toast.makeText(
                     this,
-                    "Библиотека добавлена: " + destination.getName(),
-                    Toast.LENGTH_LONG
-            ).show();
+                    "Библиотека добавлена: "
+                            + destination.getName(),
+                    Toast.LENGTH_LONG).show();
+
             refreshFiles();
+
         } catch (Exception e) {
-            error("Ошибка импорта библиотеки: " + message(e));
+            error(
+                    "Ошибка импорта библиотеки: "
+                            + message(e));
+
         } finally {
-            if (temporary != null && temporary.exists()) {
-                //noinspection ResultOfMethodCallIgnored
+            if (temporary != null
+                    && temporary.exists()) {
                 temporary.delete();
             }
         }
     }
 
     private void pickZipProject() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        Intent intent = new Intent(
+                Intent.ACTION_OPEN_DOCUMENT);
+
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("application/zip");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                "application/zip", "application/x-zip-compressed", "application/octet-stream"
-        });
+
+        intent.putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                new String[]{
+                        "application/zip",
+                        "application/x-zip-compressed",
+                        "application/octet-stream"
+                });
+
         try {
-            startActivityForResult(intent, PICK_ZIP_PROJECT);
+            startActivityForResult(
+                    intent, PICK_ZIP_PROJECT);
+
         } catch (Exception e) {
-            error("Не удалось открыть выбор ZIP-архива: " + message(e));
+            error(
+                    "Не удалось открыть выбор ZIP-архива: "
+                            + message(e));
         }
     }
 
-    /** Imports ZIP contents into the currently opened project directory. */
     private void importZipProject(Uri uri) {
-        if (projectDirectory == null || currentDirectory == null) {
+        if (projectDirectory == null
+                || currentDirectory == null) {
             error("Папка проекта недоступна");
             return;
         }
-        final List<File> createdFiles = new ArrayList<>();
-        final List<File> createdDirectories = new ArrayList<>();
-        final Set<String> archivePaths = new HashSet<>();
+
+        final List<File> createdFiles =
+                new ArrayList<>();
+
+        final List<File> createdDirectories =
+                new ArrayList<>();
+
+        final Set<String> archivePaths =
+                new HashSet<>();
+
         long totalBytes = 0;
         int entries = 0;
+
         try {
-            String rootPath = projectDirectory.getCanonicalPath();
-            String targetPath = currentDirectory.getCanonicalPath();
-            if (!targetPath.equals(rootPath) && !targetPath.startsWith(rootPath + File.separator)) {
-                throw new IOException("Текущая папка находится вне проекта");
+            String rootPath =
+                    projectDirectory.getCanonicalPath();
+
+            String targetPath =
+                    currentDirectory.getCanonicalPath();
+
+            if (!targetPath.equals(rootPath)
+                    && !targetPath.startsWith(
+                            rootPath + File.separator)) {
+                throw new IOException(
+                        "Текущая папка находится вне проекта");
             }
-            try (InputStream raw = getContentResolver().openInputStream(uri)) {
-                if (raw == null) throw new IOException("ZIP-архив недоступен");
-                try (ZipInputStream zip = new ZipInputStream(raw)) {
+
+            try (InputStream raw =
+                         getContentResolver().openInputStream(uri)) {
+
+                if (raw == null) {
+                    throw new IOException(
+                            "ZIP-архив недоступен");
+                }
+
+                try (ZipInputStream zip =
+                             new ZipInputStream(raw)) {
+
                     ZipEntry entry;
                     byte[] buffer = new byte[8192];
+
                     while ((entry = zip.getNextEntry()) != null) {
                         entries++;
-                        if (entries > MAX_ZIP_ENTRIES) {
-                            throw new IOException("В архиве больше 5000 элементов");
-                        }
-                        String entryName = entry.getName();
-                        File destination = resolveZipEntry(currentDirectory, entryName);
-                        String normalized = destination.getCanonicalPath();
-                        if (!archivePaths.add(normalized)) {
-                            throw new IOException("В архиве повторяется путь: " + entryName);
-                        }
-                        ensureNoSymbolicLinks(currentDirectory, destination);
 
-                        if (entry.isDirectory() || entryName.endsWith("/")) {
-                            createMissingDirectories(currentDirectory, destination, createdDirectories);
+                        if (entries > MAX_ZIP_ENTRIES) {
+                            throw new IOException(
+                                    "В архиве больше 5000 элементов");
+                        }
+
+                        String entryName = entry.getName();
+
+                        File destination = resolveZipEntry(
+                                currentDirectory, entryName);
+
+                        String normalized =
+                                destination.getCanonicalPath();
+
+                        if (!archivePaths.add(normalized)) {
+                            throw new IOException(
+                                    "В архиве повторяется путь: "
+                                            + entryName);
+                        }
+
+                        ensureNoSymbolicLinks(
+                                currentDirectory, destination);
+
+                        if (entry.isDirectory()
+                                || entryName.endsWith("/")) {
+
+                            createMissingDirectories(
+                                    currentDirectory,
+                                    destination,
+                                    createdDirectories);
+
                             if (!destination.isDirectory()) {
-                                throw new IOException("Не удалось создать папку: " + entryName);
+                                throw new IOException(
+                                        "Не удалось создать папку: "
+                                                + entryName);
                             }
+
                         } else {
-                            File parent = destination.getParentFile();
-                            if (parent == null) throw new IOException("Некорректный путь в ZIP");
-                            createMissingDirectories(currentDirectory, parent, createdDirectories);
-                            if (destination.exists()) {
-                                throw new IOException("Файл уже существует, перезапись запрещена: " + entryName);
+                            File parent =
+                                    destination.getParentFile();
+
+                            if (parent == null) {
+                                throw new IOException(
+                                        "Некорректный путь в ZIP");
                             }
+
+                            createMissingDirectories(
+                                    currentDirectory,
+                                    parent,
+                                    createdDirectories);
+
+                            if (destination.exists()) {
+                                throw new IOException(
+                                        "Файл уже существует, "
+                                                + "перезапись запрещена: "
+                                                + entryName);
+                            }
+
                             long entryBytes = 0;
-                            try (FileOutputStream output = new FileOutputStream(destination)) {
+
+                            try (FileOutputStream output =
+                                         new FileOutputStream(destination)) {
+
                                 createdFiles.add(destination);
+
                                 int count;
+
                                 while ((count = zip.read(buffer)) != -1) {
                                     entryBytes += count;
                                     totalBytes += count;
+
                                     if (entryBytes > MAX_ZIP_ENTRY_BYTES) {
-                                        throw new IOException("Файл в архиве больше 50 МБ: " + entryName);
+                                        throw new IOException(
+                                                "Файл в архиве больше 50 МБ: "
+                                                        + entryName);
                                     }
+
                                     if (totalBytes > MAX_ZIP_TOTAL_BYTES) {
-                                        throw new IOException("Общий размер распаковки больше 200 МБ");
+                                        throw new IOException(
+                                                "Общий размер распаковки "
+                                                        + "больше 200 МБ");
                                     }
+
                                     output.write(buffer, 0, count);
                                 }
                             }
                         }
+
                         zip.closeEntry();
                     }
                 }
             }
-            if (entries == 0) throw new IOException("ZIP-архив пуст или повреждён");
-            Toast.makeText(this, "Импорт завершён: " + entries + " элементов", Toast.LENGTH_LONG).show();
+
+            if (entries == 0) {
+                throw new IOException(
+                        "ZIP-архив пуст или повреждён");
+            }
+
+            Toast.makeText(
+                    this,
+                    "Импорт завершён: "
+                            + entries + " элементов",
+                    Toast.LENGTH_LONG).show();
+
             refreshFiles();
+
         } catch (Exception e) {
-            // Roll back only objects created by this import; existing project data is untouched.
-            for (int i = createdFiles.size() - 1; i >= 0; i--) {
-                try { Files.deleteIfExists(createdFiles.get(i).toPath()); } catch (IOException ignored) { }
+            for (int i = createdFiles.size() - 1;
+                 i >= 0; i--) {
+                try {
+                    Files.deleteIfExists(
+                            createdFiles.get(i).toPath());
+                } catch (IOException ignored) {
+                }
             }
-            for (int i = createdDirectories.size() - 1; i >= 0; i--) {
-                try { Files.deleteIfExists(createdDirectories.get(i).toPath()); } catch (IOException ignored) { }
+
+            for (int i = createdDirectories.size() - 1;
+                 i >= 0; i--) {
+                try {
+                    Files.deleteIfExists(
+                            createdDirectories.get(i).toPath());
+                } catch (IOException ignored) {
+                }
             }
-            error("Ошибка импорта ZIP: " + message(e));
+
+            error(
+                    "Ошибка импорта ZIP: "
+                            + message(e));
+
             refreshFiles();
         }
     }
 
-    private File resolveZipEntry(File base, String entryName) throws IOException {
-        if (entryName == null || entryName.trim().isEmpty() || entryName.indexOf('\0') >= 0) {
-            throw new IOException("В архиве найден пустой или некорректный путь");
+    private File resolveZipEntry(
+            File base, String entryName) throws IOException {
+
+        if (entryName == null
+                || entryName.trim().isEmpty()
+                || entryName.indexOf('\0') >= 0) {
+            throw new IOException(
+                    "В архиве найден пустой или некорректный путь");
         }
-        String normalizedName = entryName.replace('\\', '/');
-        if (normalizedName.startsWith("/") || normalizedName.matches("^[A-Za-z]:.*")) {
-            throw new IOException("Абсолютные пути в ZIP запрещены: " + entryName);
+
+        String normalizedName =
+                entryName.replace('\\', '/');
+
+        if (normalizedName.startsWith("/")
+                || normalizedName.matches("^[A-Za-z]:.*")) {
+            throw new IOException(
+                    "Абсолютные пути в ZIP запрещены: "
+                            + entryName);
         }
+
         String[] parts = normalizedName.split("/");
+
         for (String part : parts) {
             if (part.equals("..") || part.equals(".")) {
-                throw new IOException("Небезопасный путь в ZIP: " + entryName);
+                throw new IOException(
+                        "Небезопасный путь в ZIP: "
+                                + entryName);
             }
         }
-        File destination = new File(base, normalizedName).getCanonicalFile();
+
+        File destination = new File(
+                base, normalizedName).getCanonicalFile();
+
         String basePath = base.getCanonicalPath();
-        if (!destination.getPath().startsWith(basePath + File.separator)) {
-            throw new IOException("Путь архива выходит за пределы проекта: " + entryName);
+
+        if (!destination.getPath().startsWith(
+                basePath + File.separator)) {
+            throw new IOException(
+                    "Путь архива выходит за пределы проекта: "
+                            + entryName);
         }
+
         return destination;
     }
 
-    private void ensureNoSymbolicLinks(File base, File destination) throws IOException {
-        java.nio.file.Path basePath = base.getCanonicalFile().toPath();
-        java.nio.file.Path targetPath = destination.toPath();
+    private void ensureNoSymbolicLinks(
+            File base, File destination) throws IOException {
+
+        java.nio.file.Path basePath =
+                base.getCanonicalFile().toPath();
+
+        java.nio.file.Path targetPath =
+                destination.toPath();
+
         java.nio.file.Path current = basePath;
-        for (java.nio.file.Path part : basePath.relativize(targetPath)) {
+
+        for (java.nio.file.Path part :
+                basePath.relativize(targetPath)) {
+
             current = current.resolve(part);
+
             if (Files.isSymbolicLink(current)) {
-                throw new IOException("Символические ссылки в пути ZIP запрещены");
+                throw new IOException(
+                        "Символические ссылки в пути ZIP запрещены");
             }
         }
     }
 
-    private void createMissingDirectories(File base, File parent, List<File> created)
-            throws IOException {
+    private void createMissingDirectories(
+            File base,
+            File parent,
+            List<File> created) throws IOException {
+
         String basePath = base.getCanonicalPath();
         String parentPath = parent.getCanonicalPath();
-        if (!parentPath.equals(basePath) && !parentPath.startsWith(basePath + File.separator)) {
-            throw new IOException("Папка распаковки находится вне проекта");
+
+        if (!parentPath.equals(basePath)
+                && !parentPath.startsWith(
+                        basePath + File.separator)) {
+            throw new IOException(
+                    "Папка распаковки находится вне проекта");
         }
+
         if (parent.exists()) {
-            if (!parent.isDirectory()) throw new IOException("Путь для распаковки занят файлом");
+            if (!parent.isDirectory()) {
+                throw new IOException(
+                        "Путь для распаковки занят файлом");
+            }
             return;
         }
+
         File ancestor = parent;
         List<File> missing = new ArrayList<>();
-        while (ancestor != null && !ancestor.exists() && !ancestor.equals(base)) {
+
+        while (ancestor != null
+                && !ancestor.exists()
+                && !ancestor.equals(base)) {
+
             missing.add(ancestor);
             ancestor = ancestor.getParentFile();
         }
-        if (ancestor == null || !ancestor.isDirectory()) {
-            throw new IOException("Не удалось определить папку распаковки");
+
+        if (ancestor == null
+                || !ancestor.isDirectory()) {
+            throw new IOException(
+                    "Не удалось определить папку распаковки");
         }
+
         for (int i = missing.size() - 1; i >= 0; i--) {
             File dir = missing.get(i);
-            if (!dir.mkdir()) throw new IOException("Не удалось создать папку: " + dir.getName());
+
+            if (!dir.mkdir()) {
+                throw new IOException(
+                        "Не удалось создать папку: "
+                                + dir.getName());
+            }
+
             created.add(dir);
         }
     }
@@ -698,78 +1209,145 @@ public class ProjectActivity extends Activity
     public void onImportZip() {
         new AlertDialog.Builder(this)
                 .setTitle("Импорт ZIP-проекта")
-                .setMessage("Содержимое ZIP-архива будет добавлено в текущую папку проекта. Существующие файлы не перезаписываются.")
-                .setPositiveButton("Выбрать ZIP", (dialog, which) -> pickZipProject())
+                .setMessage(
+                        "Содержимое ZIP-архива будет добавлено "
+                                + "в текущую папку проекта. "
+                                + "Существующие файлы не перезаписываются.")
+                .setPositiveButton(
+                        "Выбрать ZIP",
+                        (dialog, which) -> pickZipProject())
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
     private String imageExtension(Uri uri) {
         String type = getContentResolver().getType(uri);
-        if ("image/png".equals(type)) return ".png";
-        if ("image/webp".equals(type)) return ".webp";
-        if ("image/jpeg".equals(type) || "image/jpg".equals(type)) return ".jpg";
+
+        if ("image/png".equals(type)) {
+            return ".png";
+        }
+
+        if ("image/webp".equals(type)) {
+            return ".webp";
+        }
+
+        if ("image/jpeg".equals(type)
+                || "image/jpg".equals(type)) {
+            return ".jpg";
+        }
+
         return null;
     }
 
     private void importImage(Uri uri) {
         try {
             String extension = imageExtension(uri);
+
             if (extension == null) {
-                throw new IOException("Поддерживаются PNG, JPG и WebP");
+                throw new IOException(
+                        "Поддерживаются PNG, JPG и WebP");
             }
+
             String originalName = "image" + extension;
-            try (Cursor cursor = getContentResolver().query(
-                    uri, new String[]{OpenableColumns.DISPLAY_NAME},
-                    null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
+
+            try (Cursor cursor =
+                         getContentResolver().query(
+                                 uri,
+                                 new String[]{
+                                         OpenableColumns.DISPLAY_NAME
+                                 },
+                                 null, null, null)) {
+
+                if (cursor != null
+                        && cursor.moveToFirst()) {
                     String value = cursor.getString(0);
-                    if (value != null && !value.isEmpty()) originalName = value;
+
+                    if (value != null
+                            && !value.isEmpty()) {
+                        originalName = value;
+                    }
                 }
             }
+
             String base = originalName.replaceAll(
                     "(?i)\\.(png|jpg|jpeg|webp)$", "");
+
             base = base.replaceAll(
                     "[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
-            if (base.isEmpty()) base = "image";
-            if (base.length() > 60) base = base.substring(0, 60);
+
+            if (base.isEmpty()) {
+                base = "image";
+            }
+
+            if (base.length() > 60) {
+                base = base.substring(0, 60);
+            }
 
             File destination = null;
-            for (int number = 0; number < 10000; number++) {
-                String suffix = number == 0 ? "" : "_" + number;
-                File candidate = new File(currentDirectory,
+
+            for (int number = 0;
+                 number < 10000; number++) {
+
+                String suffix = number == 0
+                        ? "" : "_" + number;
+
+                File candidate = new File(
+                        currentDirectory,
                         base + suffix + extension);
+
                 if (!candidate.exists()) {
                     destination = candidate;
                     break;
                 }
             }
-            if (destination == null || !inside(destination)) {
-                throw new IOException("Не удалось выбрать имя файла");
+
+            if (destination == null
+                    || !inside(destination)) {
+                throw new IOException(
+                        "Не удалось выбрать имя файла");
             }
+
             long maxBytes = 30L * 1024 * 1024;
             long copied = 0;
-            try (InputStream input = getContentResolver().openInputStream(uri)) {
+
+            try (InputStream input =
+                         getContentResolver().openInputStream(uri)) {
+
                 if (input == null) {
-                    throw new IOException("Изображение недоступно");
+                    throw new IOException(
+                            "Изображение недоступно");
                 }
-                try (FileOutputStream output = new FileOutputStream(destination)) {
+
+                try (FileOutputStream output =
+                             new FileOutputStream(destination)) {
+
                     byte[] buffer = new byte[8192];
                     int count;
+
                     while ((count = input.read(buffer)) != -1) {
                         copied += count;
+
                         if (copied > maxBytes) {
-                            throw new IOException("Размер изображения больше 30 МБ");
+                            throw new IOException(
+                                    "Размер изображения больше 30 МБ");
                         }
+
                         output.write(buffer, 0, count);
                     }
                 }
+
             } catch (IOException e) {
                 destination.delete();
                 throw e;
             }
-            Toast.makeText(this, "Изображение добавлено", Toast.LENGTH_SHORT).show();
+
+            Toast.makeText(
+                    this,
+                    "Изображение добавлено",
+                    Toast.LENGTH_SHORT).show();
+
             refreshFiles();
+
         } catch (Exception e) {
             error("Ошибка импорта: " + message(e));
         }
@@ -777,15 +1355,19 @@ public class ProjectActivity extends Activity
 
     private void goUp() {
         try {
-            if (currentDirectory.getCanonicalFile().equals(projectDirectory)) {
+            if (currentDirectory.getCanonicalFile()
+                    .equals(projectDirectory)) {
                 finish();
                 return;
             }
+
             File parent = currentDirectory.getParentFile();
+
             if (parent != null) {
                 currentDirectory = parent;
                 refreshFiles();
             }
+
         } catch (IOException e) {
             error(message(e));
         }
@@ -823,14 +1405,23 @@ public class ProjectActivity extends Activity
                 error("Объект вне проекта");
                 return;
             }
+
+            if (Files.isSymbolicLink(file.toPath())) {
+                error(
+                        "Символические ссылки не поддерживаются");
+                return;
+            }
+
             if (file.isDirectory()) {
-                currentDirectory = file;
-                refreshFiles();
+                openFolderAutomatically(file);
+
             } else if (file.isFile()) {
                 openFile(file);
+
             } else {
                 error("Объект недоступен");
             }
+
         } catch (IOException e) {
             error(message(e));
         }
@@ -849,6 +1440,9 @@ public class ProjectActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
-        if (projectScreen != null) refreshFiles();
+
+        if (projectScreen != null) {
+            refreshFiles();
+        }
     }
-                            }
+}

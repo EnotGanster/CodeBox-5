@@ -350,6 +350,33 @@ jobs:
 
           echo "All three patches verified."
 
+      - name: Prepare Android API 35
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          if [ -z "$SDK" ]; then
+            echo "ERROR: Android SDK not found"
+            exit 1
+          fi
+
+          JAR="$SDK/platforms/android-35/android.jar"
+
+          if [ ! -s "$JAR" ]; then
+            SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+
+            test -x "$SDKMANAGER"
+
+            "$SDKMANAGER" "platforms;android-35"
+          fi
+
+          test -s "$JAR"
+
+          echo "ANDROID_API_35_READY"
+          echo "Android API 35 is available."
+
       - name: Build Debug APK
         shell: bash
         run: |
@@ -380,47 +407,7 @@ jobs:
           sha256sum "$APK" \
             | tee diagnostics/apk-sha256.txt
 
-      - name: Prepare Android API 35
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          if [ -z "$SDK" ]; then
-            echo "ERROR: Android SDK not found"
-            exit 1
-          fi
-
-          JAR="$SDK/platforms/android-35/android.jar"
-
-          if [ ! -s "$JAR" ]; then
-            SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
-
-            test -x "$SDKMANAGER"
-
-            "$SDKMANAGER" "platforms;android-35"
-          fi
-
-          test -s "$JAR"
-
-          mkdir -p android-api-export
-
-          cp "$JAR" android-api-export/android.jar
-
-          (
-            cd android-api-export
-            sha256sum android.jar > SHA256SUMS.txt
-          )
-
-      - name: Upload Android API 35
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodeBox-5-Android-API-35
-          path: android-api-export/
-          if-no-files-found: error
-          retention-days: 30
+          echo "APK_DIAGNOSTICS_OK"
 
       - name: Upload APK
         if: success()
@@ -429,22 +416,4 @@ jobs:
           name: CodeBox-5-debug
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload patched bundletool v3
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodeBox-5-Patched-Bundletool-v3
-          path: patched-output/bundletool-patched-1.18.2.jar
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: CodeBox-5-Patch-Diagnostics-v3
-          path: diagnostics/
-          if-no-files-found: warn
-          retention-days: 30
+          retention-days: 3

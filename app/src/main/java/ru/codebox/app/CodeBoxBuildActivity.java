@@ -25,6 +25,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -61,6 +62,10 @@ public final class CodeBoxBuildActivity extends Activity {
     private TextView statusView;
     private TextView reportView;
     private TextView sdkView;
+    private TextView progressPercentView;
+    private ProgressBar buildProgressBar;
+    private int currentBuildProgress;
+    private String currentStageName = "Ожидание сборки";
 
     private String installationReport;
 
@@ -176,12 +181,17 @@ public final class CodeBoxBuildActivity extends Activity {
         int panel = Color.rgb(29, 34, 53);
         int muted = Color.rgb(185, 193, 215);
 
+        ScrollView screen = new ScrollView(this);
+        screen.setFillViewport(true);
+        screen.setBackgroundColor(bg);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(20), dp(16), dp(12));
+        root.setPadding(dp(20), dp(20), dp(20), dp(16));
         root.setBackgroundColor(bg);
 
-        setContentView(root);
+        screen.addView(root);
+        setContentView(screen);
 
         root.addView(
                 label("Сборка проекта", 23, Color.WHITE, true)
@@ -196,69 +206,104 @@ public final class CodeBoxBuildActivity extends Activity {
 
         LinearLayout.LayoutParams sp =
                 new LinearLayout.LayoutParams(-1, -2);
-
         sp.topMargin = dp(5);
         sp.bottomMargin = dp(13);
-
         root.addView(subtitle, sp);
 
+        // Верхняя карточка: статус, ошибки, предупреждения и реальный
+        // этапный прогресс сборки.
+        LinearLayout statusPanel = new LinearLayout(this);
+        statusPanel.setOrientation(LinearLayout.VERTICAL);
+        statusPanel.setPadding(dp(14), dp(12), dp(14), dp(12));
+        statusPanel.setBackground(shape(panel, 16));
+        root.addView(statusPanel);
+
         statusView = label(
-                "Ожидание",
+                "Статус: ожидание  |  Ошибок: 0  |  Предупреждений: 0",
                 13,
                 muted,
                 true
         );
+        statusPanel.addView(statusView);
 
-        statusView.setPadding(
-                dp(12), dp(10), dp(12), dp(10)
+        LinearLayout progressHeader = new LinearLayout(this);
+        progressHeader.setOrientation(LinearLayout.HORIZONTAL);
+        progressHeader.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView progressCaption = label(
+                "Прогресс сборки по этапам",
+                11,
+                muted,
+                false
+        );
+        progressHeader.addView(
+                progressCaption,
+                new LinearLayout.LayoutParams(0, -2, 1)
         );
 
-        statusView.setBackground(shape(panel, 12));
+        progressPercentView = label(
+                "0%",
+                13,
+                Color.rgb(105, 220, 155),
+                true
+        );
+        progressHeader.addView(progressPercentView);
+        LinearLayout.LayoutParams progressHeaderParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        progressHeaderParams.topMargin = dp(10);
+        statusPanel.addView(progressHeader, progressHeaderParams);
 
-        root.addView(statusView);
+        buildProgressBar = new ProgressBar(
+                this,
+                null,
+                android.R.attr.progressBarStyleHorizontal
+        );
+        buildProgressBar.setMax(100);
+        buildProgressBar.setProgress(0);
+        buildProgressBar.setProgressTintList(
+                android.content.res.ColorStateList.valueOf(
+                        Color.rgb(0, 205, 125)
+                )
+        );
+        buildProgressBar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(
+                        Color.rgb(65, 73, 94)
+                )
+        );
+        LinearLayout.LayoutParams progressBarParams =
+                new LinearLayout.LayoutParams(-1, dp(8));
+        progressBarParams.topMargin = dp(7);
+        statusPanel.addView(buildProgressBar, progressBarParams);
 
         // SDK STATUS PANEL
-
         sdkView = label(
                 "Проверка Android SDK...",
                 12,
                 muted,
                 true
         );
-
-        sdkView.setPadding(
-                dp(12), dp(10), dp(12), dp(10)
-        );
-
-        sdkView.setBackground(shape(panel, 12));
+        sdkView.setPadding(dp(12), dp(10), dp(12), dp(10));
+        sdkView.setBackground(shape(panel, 16));
 
         LinearLayout.LayoutParams sdkParams =
                 new LinearLayout.LayoutParams(-1, -2);
-
         sdkParams.topMargin = dp(8);
-
         root.addView(sdkView, sdkParams);
 
         refreshSdkStatus();
 
         // BUILD BUTTONS
-
         LinearLayout builds = new LinearLayout(this);
-
         LinearLayout.LayoutParams bp =
                 new LinearLayout.LayoutParams(-1, -2);
-
         bp.topMargin = dp(10);
-
         root.addView(builds, bp);
 
         addWeightedButton(
                 builds,
                 "Собрать APK",
                 Color.rgb(107, 73, 218),
-                () -> requestBuild(
-                        CodeBoxBuildManager.OutputFormat.APK
-                ),
+                () -> requestBuild(CodeBoxBuildManager.OutputFormat.APK),
                 true
         );
 
@@ -266,19 +311,14 @@ public final class CodeBoxBuildActivity extends Activity {
                 builds,
                 "Собрать AAB",
                 Color.rgb(37, 111, 192),
-                () -> requestBuild(
-                        CodeBoxBuildManager.OutputFormat.AAB
-                ),
+                () -> requestBuild(CodeBoxBuildManager.OutputFormat.AAB),
                 false
         );
 
         LinearLayout actions = new LinearLayout(this);
-
         LinearLayout.LayoutParams ap =
                 new LinearLayout.LayoutParams(-1, -2);
-
         ap.topMargin = dp(8);
-
         root.addView(actions, ap);
 
         addWeightedButton(
@@ -313,39 +353,14 @@ public final class CodeBoxBuildActivity extends Activity {
                 8
         );
 
-        TextView heading = label(
-                "Журнал сборки",
-                17,
-                Color.WHITE,
-                true
+        // Кнопки результата подняты сразу под основными действиями.
+        addFullButton(
+                root,
+                "Сохранить APK / AAB",
+                Color.rgb(89, 69, 173),
+                this::requestArtifactExport,
+                12
         );
-
-        LinearLayout.LayoutParams hp =
-                new LinearLayout.LayoutParams(-1, -2);
-        hp.topMargin = dp(15);
-        hp.bottomMargin = dp(6);
-        root.addView(heading, hp);
-
-        // Короткий предпросмотр вместо сжатого многострочного журнала.
-        ScrollView previewScroll = new ScrollView(this);
-        previewScroll.setFillViewport(false);
-        previewScroll.setBackground(shape(panel, 12));
-
-        LinearLayout.LayoutParams previewParams =
-                new LinearLayout.LayoutParams(-1, dp(76));
-        root.addView(previewScroll, previewParams);
-
-        reportView = label(
-                "Журнал появится после проверки.",
-                11,
-                muted,
-                false
-        );
-        reportView.setTypeface(Typeface.MONOSPACE);
-        reportView.setTextIsSelectable(true);
-        reportView.setMaxLines(3);
-        reportView.setPadding(dp(12), dp(10), dp(12), dp(10));
-        previewScroll.addView(reportView);
 
         addFullButton(
                 root,
@@ -355,21 +370,12 @@ public final class CodeBoxBuildActivity extends Activity {
                 8
         );
 
-        addFullButton(
-                root,
-                "Сохранить APK / AAB",
-                Color.rgb(47, 121, 113),
-                this::requestArtifactExport,
-                10
-        );
-
+        // Дополнительные функции журнала сохраняются, но больше
+        // не занимают место большим предпросмотром на главном экране.
         LinearLayout tools = new LinearLayout(this);
-
         LinearLayout.LayoutParams tp =
                 new LinearLayout.LayoutParams(-1, -2);
-
-        tp.topMargin = dp(10);
-
+        tp.topMargin = dp(8);
         root.addView(tools, tp);
 
         addWeightedButton(
@@ -387,6 +393,41 @@ public final class CodeBoxBuildActivity extends Activity {
                 this::shareLog,
                 false
         );
+
+        // Скрытый текстовый буфер оставлен для совместимости с
+        // существующими операциями установки и формирования отчёта.
+        reportView = label("", 11, muted, false);
+        reportView.setTypeface(Typeface.MONOSPACE);
+        reportView.setTextIsSelectable(true);
+
+        updateProgressUi("Ожидание сборки", 0);
+    }
+
+    private void updateProgressUi(String stage, int progress) {
+        currentStageName = stage == null ? "Выполнение операции" : stage;
+        currentBuildProgress = Math.max(0, Math.min(100, progress));
+
+        runOnUiThread(() -> {
+            if (progressPercentView != null) {
+                progressPercentView.setText(currentBuildProgress + "%");
+            }
+            if (buildProgressBar != null) {
+                buildProgressBar.setProgress(currentBuildProgress);
+            }
+            if (statusView != null && manager != null) {
+                statusView.setText(
+                        "Статус: " + currentStageName
+                                + "  |  Ошибок: " + manager.getErrorCount()
+                                + "  |  Предупреждений: "
+                                + manager.getWarningCount()
+                );
+            }
+        });
+    }
+
+    private void setBuildStage(String stage, int progress) {
+        manager.setStage(stage);
+        updateProgressUi(stage, progress);
     }
 
     private void addFullButton(
@@ -514,14 +555,16 @@ public final class CodeBoxBuildActivity extends Activity {
         }
 
         busy = true;
+        updateProgressUi("Подготовка сборки", 0);
         installationReport = null;
         artifactPendingExport = null;
         signedUniversalApk = null;
         builtApplicationId = null;
         pendingInstallApk = null;
 
-        statusView.setText(
-                "Статус: сборка " + format.name() + "..."
+        updateProgressUi(
+                "Сборка " + format.name() + " — запуск",
+                0
         );
 
         reportView.setText(
@@ -533,7 +576,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 manager.start(projectName, format);
 
-                manager.setStage("Проверка проекта");
+                setBuildStage("Проверка проекта", 4);
 
                 File projectsRoot =
                         new File(getFilesDir(), "projects")
@@ -559,7 +602,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 manager.info("Формат результата: " + format.name());
 
-                manager.setStage("Проверка инструментов");
+                setBuildStage("Проверка инструментов", 8);
 
                 CodeBoxToolchainInspector.Result tools =
                         CodeBoxToolchainInspector.inspect(
@@ -592,7 +635,7 @@ public final class CodeBoxBuildActivity extends Activity {
                                 + getAndroidJarFile().length()
                 );
 
-                manager.setStage("Проверка и запуск AAPT2");
+                setBuildStage("Проверка и запуск AAPT2", 13);
 
                 try {
 
@@ -631,7 +674,7 @@ public final class CodeBoxBuildActivity extends Activity {
                     );
                 }
 
-                manager.setStage("Подготовка AndroidManifest.xml");
+                setBuildStage("Подготовка AndroidManifest.xml", 18);
 
                 File preparedManifest;
 
@@ -688,10 +731,11 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 File linkedResources;
 
-                manager.setStage(
+                setBuildStage(
                         format == CodeBoxBuildManager.OutputFormat.APK
                                 ? "Компиляция ресурсов APK (AAPT2)"
-                                : "Компиляция protobuf ресурсов AAB (AAPT2)"
+                                : "Компиляция protobuf ресурсов AAB (AAPT2)",
+                        26
                 );
 
                 try {
@@ -746,7 +790,7 @@ public final class CodeBoxBuildActivity extends Activity {
                     return;
                 }
 
-                manager.setStage("Подготовка Java");
+                setBuildStage("Подготовка Java", 32);
 
                 CodeBoxJavaCompiler.Result prep =
                         CodeBoxJavaCompiler.inspect(
@@ -756,7 +800,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
                 manager.info(prep.report);
 
-                manager.setStage("Компиляция Java (ECJ)");
+                setBuildStage("Компиляция Java (ECJ)", 45);
 
                 CodeBoxEcjCompiler.Result compiled =
                         CodeBoxEcjCompiler.compile(
@@ -817,7 +861,7 @@ public final class CodeBoxBuildActivity extends Activity {
             File linkedResources
     ) throws IOException {
 
-        manager.setStage("Проверка CLASS");
+        setBuildStage("Проверка CLASS", 53);
 
         if (classesDirectory == null
                 || !classesDirectory.isDirectory()) {
@@ -867,7 +911,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         manager.info("Проверка CLASS завершена.");
 
-        manager.setStage("Проверка D8");
+        setBuildStage("Проверка D8", 58);
 
         try {
             manager.info(
@@ -879,7 +923,7 @@ public final class CodeBoxBuildActivity extends Activity {
             manager.warning("Ошибка проверки D8: " + e);
         }
 
-        manager.setStage("Компиляция DEX (D8)");
+        setBuildStage("Компиляция DEX (D8)", 66);
 
         CodeBoxD8Compiler.Result dex =
                 CodeBoxD8Compiler.compile(
@@ -989,7 +1033,7 @@ public final class CodeBoxBuildActivity extends Activity {
             File dexFile
     ) throws IOException {
 
-        manager.setStage("Упаковка APK");
+        setBuildStage("Упаковка APK", 82);
 
         CodeBoxApkPackager.Result packaged =
                 CodeBoxApkPackager.packageApk(
@@ -1020,7 +1064,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Размер: " + packaged.apkFile.length() + " байт"
         );
 
-        manager.setStage("Подпись APK");
+        setBuildStage("Подпись APK", 94);
 
         CodeBoxApkSigner.Result signed =
                 CodeBoxApkSigner.sign(
@@ -1064,7 +1108,7 @@ public final class CodeBoxBuildActivity extends Activity {
             File dexFile
     ) throws IOException {
 
-        manager.setStage("Подготовка модуля base (AAB)");
+        setBuildStage("Подготовка модуля base (AAB)", 78);
 
         CodeBoxAabBuilder.Result base =
                 CodeBoxAabBuilder.buildBaseModule(
@@ -1089,7 +1133,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         manager.info("BASE_MODULE_PREPARED: OK");
 
-        manager.setStage("Формирование AAB (bundletool)");
+        setBuildStage("Формирование AAB (bundletool)", 86);
 
         CodeBoxBundletoolCompiler.Result bundle =
                 CodeBoxBundletoolCompiler.build(
@@ -1122,7 +1166,7 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Размер: " + bundle.aabFile.length() + " байт"
         );
 
-        manager.setStage("Подпись AAB (CMS/PKCS#7)");
+        setBuildStage("Подпись AAB (CMS/PKCS#7)", 92);
 
         manager.info("Начало JAR-подписи AAB.");
         manager.info("Алгоритм: SHA256withRSA");
@@ -1160,8 +1204,9 @@ public final class CodeBoxBuildActivity extends Activity {
                 "Размер: " + signed.aabFile.length() + " байт"
         );
 
-        manager.setStage(
-                "Проверка подписанного AAB (bundletool)"
+        setBuildStage(
+                "Проверка подписанного AAB (bundletool)",
+                97
         );
 
         manager.info("Запуск CodeBoxAabValidator.");
@@ -1331,9 +1376,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         busy = true;
 
-        statusView.setText(
-                "Статус: подготовка APK к установке..."
-        );
+        updateProgressUi("Подготовка APK к установке", 10);
 
         new Thread(() -> {
 
@@ -1687,9 +1730,7 @@ public final class CodeBoxBuildActivity extends Activity {
 
         busy = true;
 
-        statusView.setText(
-                "Статус: сохранение " + source.getName() + "..."
-        );
+        updateProgressUi("Сохранение " + source.getName(), 10);
 
         new Thread(() -> {
 
@@ -1828,9 +1869,7 @@ public final class CodeBoxBuildActivity extends Activity {
         busy = true;
         installationReport = null;
 
-        statusView.setText(
-                "Статус: установка android.jar..."
-        );
+        updateProgressUi("Установка android.jar", 10);
 
         reportView.setText(
                 "Проверяем Android API и копируем файл "
@@ -1945,9 +1984,7 @@ public final class CodeBoxBuildActivity extends Activity {
         busy = true;
         installationReport = null;
 
-        statusView.setText(
-                "Статус: установка инструментов..."
-        );
+        updateProgressUi("Установка инструментов", 10);
 
         reportView.setText(
                 "Проверка SHA-256 и распаковка ZIP. Подождите..."
@@ -2137,53 +2174,46 @@ public final class CodeBoxBuildActivity extends Activity {
 
     private void refreshReport() {
 
-        if (manager == null
-                || statusView == null
-                || reportView == null) {
+        if (manager == null || statusView == null) {
             return;
         }
 
         if (installationReport != null) {
-
             boolean failed =
                     installationReport.contains("Статус: FAILED");
 
             statusView.setText(
-                    failed
-                            ? "Установка: ошибка"
-                            : "Установка: завершена"
+                    (failed ? "Установка: ошибка" : "Установка: завершена")
+                            + "  |  Ошибок: "
+                            + (failed ? "1" : "0")
+                            + "  |  Предупреждений: 0"
             );
-
-            setReportPreview(installationReport);
-
+            updateProgressUi(
+                    failed ? "Установка: ошибка" : "Установка: завершена",
+                    failed ? currentBuildProgress : 100
+            );
             return;
         }
 
-        CodeBoxBuildManager.State state =
-                manager.getState();
+        CodeBoxBuildManager.State state = manager.getState();
+        int errors = manager.getErrorCount();
+        int warnings = manager.getWarningCount();
+
+        if (state == CodeBoxBuildManager.State.SUCCEEDED) {
+            updateProgressUi("Сборка успешно завершена", 100);
+        } else if (state == CodeBoxBuildManager.State.FAILED) {
+            updateProgressUi("Сборка завершилась с ошибкой", currentBuildProgress);
+        } else if (state == CodeBoxBuildManager.State.IDLE) {
+            updateProgressUi("Ожидание сборки", 0);
+        } else {
+            updateProgressUi(currentStageName, currentBuildProgress);
+        }
 
         statusView.setText(
                 "Статус: " + state.name()
-                        + "  |  Ошибок: " + manager.getErrorCount()
-                        + "  |  Предупреждений: "
-                        + manager.getWarningCount()
+                        + "  |  Ошибок: " + errors
+                        + "  |  Предупреждений: " + warnings
         );
-
-        if (state == CodeBoxBuildManager.State.IDLE) {
-
-            setReportPreview(
-                    "CodeBox 5 готов к локальной сборке.\n\n"
-                            + "Android SDK проверяется автоматически.\n"
-                            + "Установленный android.jar хранится "
-                            + "во внутренней памяти приложения.\n\n"
-                            + "Расположение:\n"
-                            + getAndroidJarFile().getAbsolutePath()
-            );
-
-        } else {
-
-            setReportPreview(manager.getReport());
-        }
     }
 
     // ---------------------------------------------------------
@@ -2632,4 +2662,4 @@ public final class CodeBoxBuildActivity extends Activity {
                 Toast.LENGTH_LONG
         ).show();
     }
-                        }
+            }

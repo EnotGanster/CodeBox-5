@@ -10,12 +10,18 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayDeque;
+import java.util.Date;
 import java.util.Arrays;
 
 public class MainActivity extends Activity
@@ -24,6 +30,8 @@ public class MainActivity extends Activity
     private static final int HOME = 0;
     private static final int PROJECTS = 1;
     private static final int TREE = 2;
+    private static final int EXPORT_PROJECT_INFO = 6102;
+    private String pendingProjectReport;
 
     private ProjectManager projectManager;
     private int currentPage = HOME;
@@ -468,7 +476,19 @@ public class MainActivity extends Activity
                 CodeBoxTheme.secondaryText(this)
         );
 
-        card.addView(arrow);
+        LinearLayout actions = column();
+        actions.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView dots = text("⋮", 26, true);
+        dots.setGravity(Gravity.CENTER);
+        dots.setContentDescription("Действия с проектом " + project.getName());
+        actions.addView(dots, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        LinearLayout.LayoutParams arrowParams = new LinearLayout.LayoutParams(dp(44), dp(38));
+        arrowParams.topMargin = dp(12);
+        arrow.setGravity(Gravity.CENTER);
+        actions.addView(arrow, arrowParams);
+        card.addView(actions);
+        dots.setOnClickListener(v -> showProjectActions(dots, project));
+        arrow.setOnClickListener(v -> openProject(project.getName()));
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
@@ -484,6 +504,161 @@ public class MainActivity extends Activity
                         project.getName()
                 )
         );
+    }
+
+    private File safeProject(File project) throws IOException {
+        String name = project.getName();
+        if (!name.matches("[A-Za-z][A-Za-z0-9_]{0,49}")) {
+            throw new IOException("Недопустимое имя проекта");
+        }
+        File root = new File(getFilesDir(), "projects").getCanonicalFile();
+        File candidate = new File(root, name);
+        if (Files.isSymbolicLink(candidate.toPath())) {
+            throw new IOException("Ссылка вместо папки проекта");
+        }
+        File canonical = candidate.getCanonicalFile();
+        if (!root.equals(canonical.getParentFile()) || !canonical.isDirectory()) {
+            throw new IOException("Папка проекта не найдена");
+        }
+        return canonical;
+    }
+
+    private void showProjectActions(View anchor, File project) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 1, 0, "Информация о проекте");
+        menu.getMenu().add(0, 2, 1, "Сохранить информацию (TXT)");
+        menu.getMenu().add(0, 3, 2, "Удалить проект");
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) showProjectInfo(project);
+            else if (item.getItemId() == 2) exportProjectInfo(project);
+            else if (item.getItemId() == 3) confirmDeleteProject(project);
+            return true;
+        });
+        menu.show();
+    }
+
+    private String projectReport(File project) throws IOException {
+        File directory = safeProject(project);
+        long bytes = 0;
+        int files = 0;
+        int folders = 0;
+        ArrayDeque<File> stack = new ArrayDeque<>();
+        stack.push(directory);
+        int visited = 0;
+        while (!stack.isEmpty()) {
+            File folder = stack.pop();
+            if (++visited > 100000) throw new IOException("Слишком много элементов");
+            File[] children = folder.listFiles();
+            if (children == null) throw new IOException("Не удалось прочитать папку: " + folder.getName());
+            for (File child : children) {
+                if (Files.isSymbolicLink(child.toPath())) continue;
+                if (child.isDirectory()) {
+                    folders++;
+                    stack.push(child);
+                } else if (child.isFile()) {
+                    files++;
+                    bytes += child.length();
+                }
+            }
+        }
+        return "CodeBox 5 — информация о проекте\n"
+                + "Название: " + directory.getName() + "\n"
+                + "Тип: Android Java\n"
+                + "Путь: " + directory.getAbsolutePath() + "\n"
+                + "Файлов: " + files + "\n"
+                + "Папок: " + folders + "\n"
+                + "Размер файлов: " + bytes + " байт\n"
+                + "Изменён: " + new Date(directory.lastModified()) + "\n"
+                + "Отчёт создан: " + new Date() + "\n";
+    }
+
+    private void showProjectInfo(File project) {
+        try {
+            new AlertDialog.Builder(this)
+                    .setTitle("Информация: " + project.getName())
+                    .setMessage(projectReport(project))
+                    .setPositiveButton("Закрыть", null)
+                    .setNeutralButton("Сохранить TXT", (d, w) -> exportProjectInfo(project))
+                    .show();
+        } catch (IOException e) {
+            showProjectError(e);
+        }
+    }
+
+    private void exportProjectInfo(File project) {
+        try {
+            pendingProjectReport = projectReport(project);
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, project.getName() + "_info.txt");
+            startActivityForResult(intent, EXPORT_PROJECT_INFO);
+        } catch (Exception e) {
+            pendingProjectReport = null;
+            showProjectError(e);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != EXPORT_PROJECT_INFO) return;
+        String report = pendingProjectReport;
+        pendingProjectReport = null;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null || report == null) return;
+        try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+            if (out == null) throw new IOException("Не удалось открыть файл");
+            out.write(report.getBytes(StandardCharsets.UTF_8));
+            Toast.makeText(this, "Информация сохранена", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            showProjectError(e);
+        }
+    }
+
+    private void confirmDeleteProject(File project) {
+        new AlertDialog.Builder(this)
+                .setTitle("Удалить проект " + project.getName() + "?")
+                .setMessage("Все файлы проекта будут удалены без возможности восстановления. Сначала сохрани нужные данные.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Удалить", (d, w) -> {
+                    try {
+                        File directory = safeProject(project);
+                        deleteProjectTree(directory);
+                        Toast.makeText(this, "Проект удалён: " + project.getName(), Toast.LENGTH_SHORT).show();
+                        showProjects();
+                    } catch (IOException e) {
+                        showProjectError(e);
+                        showProjects();
+                    }
+                })
+                .show();
+    }
+
+    private void deleteProjectTree(File root) throws IOException {
+        // Do not traverse symlinks. Limit traversal to the selected project.
+        ArrayDeque<File> pending = new ArrayDeque<>();
+        ArrayDeque<File> reverse = new ArrayDeque<>();
+        pending.push(root);
+        int visited = 0;
+        while (!pending.isEmpty()) {
+            File current = pending.pop();
+            if (++visited > 100000) throw new IOException("Превышен лимит элементов");
+            reverse.push(current);
+            if (Files.isSymbolicLink(current.toPath())) continue;
+            if (current.isDirectory()) {
+                File[] children = current.listFiles();
+                if (children == null) throw new IOException("Ошибка чтения: " + current.getName());
+                for (File child : children) pending.push(child);
+            }
+        }
+        while (!reverse.isEmpty()) {
+            File current = reverse.pop();
+            if (!current.delete()) throw new IOException("Не удалось удалить: " + current.getName());
+        }
+    }
+
+    private void showProjectError(Exception e) {
+        Toast.makeText(this, "Ошибка: " + e.getMessage(), Toast.LENGTH_LONG).show();
     }
 
     private void showTreeProjects() {
@@ -957,4 +1132,4 @@ public class MainActivity extends Activity
             super.onBackPressed();
         }
     }
-                      }
+    }

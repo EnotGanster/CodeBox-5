@@ -1,1 +1,112 @@
+name: Export Codibox Dragon toolchain
 
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout CodeBox 5
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Resolve toolchain artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/dragon-export.init.gradle" <<'GRADLE'
+          gradle.beforeProject { project ->
+              if (project == project.rootProject) {
+                  project.tasks.register('exportDragonToolchain') {
+                      doLast {
+                          def out = new File(project.buildDir, 'dragon-toolchain')
+                          def deps = new File(out, 'dependencies')
+                          deps.mkdirs()
+                          project.repositories {
+                              google()
+                              mavenCentral()
+                          }
+                          def modules = [
+                              'ecj.jar': 'org.eclipse.jdt:ecj:3.18.0',
+                              'd8.jar': 'com.android.tools:r8:8.7.18',
+                              'apksigner.jar': 'com.android.tools.build:apksig:8.7.3',
+                              'protobuf-java.jar': 'com.google.protobuf:protobuf-java:3.25.5',
+                              'guava.jar': 'com.google.guava:guava:33.3.1-jre'
+                          ]
+                          modules.each { target, notation ->
+                              def cfg = project.configurations.detachedConfiguration(project.dependencies.create(notation))
+                              cfg.transitive = true
+                              def artifacts = cfg.resolvedConfiguration.resolvedArtifacts
+                              def primary = artifacts.find { a ->
+                                  a.moduleVersion.id.group == notation.split(':')[0] &&
+                                  a.name == notation.split(':')[1]
+                              }
+                              if (primary == null || !primary.file.name.endsWith('.jar')) {
+                                  throw new GradleException('Missing JAR: ' + notation)
+                              }
+                              project.copy { from primary.file; into out; rename { target } }
+                              artifacts.each { a ->
+                                  if (a.file.name.endsWith('.jar')) {
+                                      def id = a.moduleVersion.id
+                                      def dest = "${id.group}.${id.name}-${id.version}.jar".replaceAll('[^A-Za-z0-9_.-]', '_')
+                                      project.copy { from a.file; into deps; rename { dest } }
+                                  }
+                              }
+                          }
+                          def patched = project.file('app/libs/bundletool-patched-1.18.2.jar')
+                          if (!patched.isFile()) throw new GradleException('Patched bundletool missing')
+                          project.copy { from patched; into out; rename { 'bundletool.jar' } }
+                          def nativeAapt = project.file('app/src/main/jniLibs/arm64-v8a/libaapt2.so')
+                          if (!nativeAapt.isFile()) throw new GradleException('ARM64 AAPT2 missing')
+                          project.copy { from nativeAapt; into new File(out, 'arm64-v8a') }
+                          new File(out, 'README.txt').text = '''Codibox Dragon toolchain export from CodeBox 5.
+          The current Dragon ZIP installer recognizes only six root JAR filenames:
+          ecj.jar, d8.jar, apksigner.jar, bundletool.jar, guava.jar, protobuf-java.jar.
+          dependencies/ and arm64-v8a/libaapt2.so are NOT installed by the current installer.
+          This ZIP is NOT sufficient for a working offline APK/AAB build yet.
+          AAPT2 must be integrated separately; compiler dependencies must be loaded explicitly.
+          Do not treat successful ZIP installation as proof of compiler compatibility.
+          '''
+                          println "DRAGON_TOOLCHAIN_DIR=${out.absolutePath}"
+                      }
+                  }
+              }
+          }
+          GRADLE
+          gradle --no-daemon -I "$RUNNER_TEMP/dragon-export.init.gradle" exportDragonToolchain
+
+      - name: Validate and package ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build/dragon-toolchain
+          for f in ecj.jar d8.jar apksigner.jar bundletool.jar guava.jar protobuf-java.jar; do
+            test -s "$f"
+            unzip -tq "$f" >/dev/null
+          done
+          test -s arm64-v8a/libaapt2.so
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          zip -qr "$GITHUB_WORKSPACE/CodiboxDragon-toolchain.zip" .
+          unzip -tq "$GITHUB_WORKSPACE/CodiboxDragon-toolchain.zip"
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CodiboxDragon-toolchain
+          path: CodiboxDragon-toolchain.zip
+          if-no-files-found: error
+          retention-days: 14

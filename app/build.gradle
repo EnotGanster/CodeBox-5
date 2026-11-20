@@ -7,7 +7,8 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'ru.codebox.app'
+        // Отдельное тестовое приложение
+        applicationId 'ru.codebox.jnitest'
         minSdk 26
         targetSdk 28
         versionCode 1
@@ -20,24 +21,11 @@ android {
         }
     }
 
-    // -----------------------------------------
-    // Packaging configuration
-    // -----------------------------------------
-
     packaging {
-
         jniLibs {
+            // Извлекать libaapt2.so из APK
+            // в каталог нативных библиотек.
             useLegacyPackaging = true
-        }
-
-        resources {
-
-            // Exclude duplicate Bouncy Castle
-            // OSGi manifest resources.
-
-            excludes += [
-                'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
-            ]
         }
     }
 
@@ -47,301 +35,16 @@ android {
     }
 }
 
-// ---------------------------------------------
-// CodeBox 5 - dependency configurations
-// ---------------------------------------------
-
-configurations {
-
-    bundletoolDependencies {
-        transitive = true
-    }
-
-    guavaJreJar {
-        transitive = false
-        canBeConsumed = false
-        canBeResolved = true
-    }
-}
-
-// ---------------------------------------------
-// Prevent duplicate Guava classes
-// ---------------------------------------------
-
-configurations.configureEach { config ->
-
-    if (config.name != 'guavaJreJar'
-            && config.name != 'bundletoolDependencies') {
-
-        // Prevent Android Guava from replacing
-        // the full JRE Guava.
-
-        exclude group: 'com.google.guava',
-                module: 'guava'
-
-        // Full Guava JRE already contains
-        // ListenableFuture.
-        // Prevent duplicate class definitions.
-
-        exclude group: 'com.google.guava',
-                module: 'listenablefuture'
-    }
-}
-
-// ---------------------------------------------
-// Dependencies
-// ---------------------------------------------
-
 dependencies {
-
-    // -----------------------------------------
-    // AndroidX Core - FileProvider
-    // -----------------------------------------
-
-    implementation 'androidx.core:core:1.13.1'
-
-    // -----------------------------------------
-    // Java compiler
-    // -----------------------------------------
-
+    // ECJ для Android 12
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
-    // -----------------------------------------
-    // CLASS to DEX
-    // -----------------------------------------
-
+    // CLASS -> DEX
     implementation 'com.android.tools:r8:8.7.18'
 
-    // -----------------------------------------
-    // APK signing
-    // -----------------------------------------
-
+    // Подпись APK
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // -----------------------------------------
-    // Patched bundletool
-    // -----------------------------------------
-
-    implementation files(
-        'libs/bundletool-patched-1.18.2.jar'
-    )
-
-    // Bundletool transitive dependencies.
-    bundletoolDependencies(
-        'com.android.tools.build:bundletool:1.18.2'
-    )
-
-    // -----------------------------------------
-    // Protocol Buffers
-    // -----------------------------------------
-
-    implementation 'com.google.protobuf:protobuf-java:3.25.5'
-
-    // -----------------------------------------
-    // Full Guava JRE
-    // -----------------------------------------
-
-    guavaJreJar(
-        'com.google.guava:guava:33.3.1-jre@jar'
-    )
-
-    // Include only the full JRE Guava.
-    implementation files({
-        configurations.guavaJreJar.files
-    })
-
-    // Supporting Guava dependency.
-    implementation 'com.google.guava:failureaccess:1.0.2'
-
-    // -----------------------------------------
-    // AAB signing - Bouncy Castle
-    // -----------------------------------------
-
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
-
-    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
-}
-
-// ---------------------------------------------
-// Transfer bundletool dependencies
-// ---------------------------------------------
-
-def bundletoolDependencyArtifacts =
-    configurations.bundletoolDependencies
-        .incoming
-        .resolutionResult
-
-afterEvaluate {
-
-    def rootComponent =
-        bundletoolDependencyArtifacts.root
-
-    rootComponent.dependencies.each { dependency ->
-
-        if (dependency instanceof
-                org.gradle.api.artifacts.result.ResolvedDependencyResult) {
-
-            def selected = dependency.selected
-
-            if (selected.moduleVersion != null
-                    && selected.moduleVersion.group ==
-                    'com.android.tools.build'
-                    && selected.moduleVersion.name == 'bundletool') {
-
-                selected.dependencies.each { child ->
-
-                    if (child instanceof
-                            org.gradle.api.artifacts.result.ResolvedDependencyResult) {
-
-                        def module = child.selected.moduleVersion
-
-                        if (module != null
-                                && !(module.group ==
-                                    'com.android.tools.build'
-                                    && module.name == 'bundletool')
-                                && !(module.group ==
-                                    'com.google.guava'
-                                    && module.name == 'guava')
-                                && !(module.group ==
-                                    'com.google.guava'
-                                    && module.name == 'listenablefuture')) {
-
-                            dependencies.add(
-                                'implementation',
-                                "${module.group}:${module.name}:${module.version}"
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---------------------------------------------
-// Guava diagnostics
-// ---------------------------------------------
-
-tasks.register('diagnoseGuava') {
-
-    doLast {
-
-        println ''
-        println '========================================'
-        println 'CODEBOX 5 - GUAVA DIAGNOSTICS'
-        println '========================================'
-
-        def targetClass =
-            'com/google/common/collect/Streams.class'
-
-        def jreFiles =
-            configurations.guavaJreJar.resolve()
-
-        boolean streamsFound = false
-
-        println ''
-        println '--- JRE Guava ---'
-
-        jreFiles.each { file ->
-
-            println "GUAVA_JRE_FILE: ${file.name}"
-            println "GUAVA_JRE_SIZE: ${file.length()}"
-
-            if (file.name.endsWith('.jar')) {
-
-                def zip = new java.util.zip.ZipFile(file)
-
-                try {
-
-                    if (zip.getEntry(targetClass) != null) {
-
-                        streamsFound = true
-                        println 'GUAVA_JRE_STREAMS: FOUND'
-
-                    } else {
-
-                        println 'GUAVA_JRE_STREAMS: MISSING'
-                    }
-
-                } finally {
-                    zip.close()
-                }
-            }
-        }
-
-        println ''
-        println '--- Android runtime ---'
-
-        def runtime =
-            configurations.getByName(
-                'debugRuntimeClasspath'
-            )
-
-        def artifacts =
-            runtime.resolvedConfiguration.resolvedArtifacts
-
-        boolean androidGuavaFound = false
-        boolean listenableFutureFound = false
-
-        artifacts.each { artifact ->
-
-            def id = artifact.moduleVersion.id
-
-            if (id.group == 'com.google.guava'
-                    && id.name == 'guava') {
-
-                androidGuavaFound = true
-
-                println "UNEXPECTED_GUAVA: ${artifact.file.name}"
-            }
-
-            if (id.group == 'com.google.guava'
-                    && id.name == 'listenablefuture') {
-
-                listenableFutureFound = true
-
-                println "UNEXPECTED_LISTENABLE_FUTURE: ${artifact.file.name}"
-            }
-        }
-
-        println ''
-        println '--- Final result ---'
-
-        println "GUAVA_STREAMS_FOUND: ${streamsFound}"
-        println "ANDROID_GUAVA_FOUND: ${androidGuavaFound}"
-        println "LISTENABLE_FUTURE_DUPLICATE: ${listenableFutureFound}"
-
-        if (!streamsFound) {
-            throw new GradleException(
-                'Full Guava JRE is missing Streams.class'
-            )
-        }
-
-        if (androidGuavaFound) {
-            throw new GradleException(
-                'Duplicate Guava dependency detected'
-            )
-        }
-
-        if (listenableFutureFound) {
-            throw new GradleException(
-                'Duplicate ListenableFuture dependency detected'
-            )
-        }
-
-        println 'GUAVA_DIAGNOSTICS: PASSED'
-        println '========================================'
-        println ''
-    }
-}
-
-// ---------------------------------------------
-// Diagnostics before APK build
-// ---------------------------------------------
-
-tasks.matching {
-    it.name == 'assembleDebug'
-}.configureEach {
-
-    dependsOn tasks.named('diagnoseGuava')
+    // Android App Bundle
+    implementation 'com.android.tools.build:bundletool:1.18.2'
 }

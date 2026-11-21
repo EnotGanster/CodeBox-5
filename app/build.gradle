@@ -1,7 +1,3 @@
-// CodeBox Drop 5.5
-// Отдельная тестовая версия CodeBox 5.
-// Основное приложение ru.codebox.app не изменяем.
-
 plugins {
     id 'com.android.application'
 }
@@ -44,8 +40,7 @@ android {
     }
 }
 
-// Отдельная конфигурация Guava JRE.
-// Предотвращаем конфликт Android/JRE версий.
+// Отдельная Guava JRE для CodeBox.
 
 configurations {
     guavaJreJar {
@@ -56,31 +51,37 @@ configurations {
 }
 
 configurations.configureEach { configuration ->
+
     if (configuration.name != 'guavaJreJar') {
+
         configuration.exclude(
             group: 'com.google.guava',
             module: 'guava'
         )
+
+        // Исправление дублирования ListenableFuture
+        configuration.exclude(
+            group: 'com.google.guava',
+            module: 'listenablefuture'
+        )
     }
 }
-
-// Зависимости локального сборщика APK/AAB.
 
 dependencies {
 
     // AndroidX
     implementation 'androidx.core:core:1.13.1'
 
-    // Компилятор Java
+    // Java compiler
     implementation 'org.eclipse.jdt:ecj:3.18.0'
 
     // D8 / R8
     implementation 'com.android.tools:r8:8.7.18'
 
-    // Подпись APK
+    // APK signing
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    // Bundletool
+    // AAB / Bundletool
     implementation 'com.android.tools.build:bundletool:1.18.2'
 
     // Protobuf
@@ -93,7 +94,7 @@ dependencies {
 
     implementation 'com.google.guava:failureaccess:1.0.2'
 
-    // Bouncy Castle: подпись AAB
+    // Bouncy Castle
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
 
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'

@@ -1,16 +1,9 @@
+// CodeBox Drop 5.5
+// Отдельная тестовая версия CodeBox 5.
+// Основное приложение ru.codebox.app не изменяем.
+
 plugins {
     id 'com.android.application'
-}
-
-configurations {
-    guavaJreJar
-}
-
-configurations.configureEach { configuration ->
-    if (configuration.name != 'guavaJreJar') {
-        exclude group: 'com.google.guava', module: 'guava'
-        exclude group: 'com.google.guava', module: 'listenablefuture'
-    }
 }
 
 android {
@@ -18,11 +11,13 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'ru.codebox.jnitest'
+        applicationId 'ru.codebox.drop55'
+
         minSdk 26
         targetSdk 28
+
         versionCode 1
-        versionName '5.0-jni-test'
+        versionName '5.5-drop'
     }
 
     buildTypes {
@@ -31,41 +26,75 @@ android {
         }
     }
 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
         }
+
         resources {
             excludes += [
                 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
             ]
         }
     }
+}
 
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+// Отдельная конфигурация Guava JRE.
+// Предотвращаем конфликт Android/JRE версий.
+
+configurations {
+    guavaJreJar {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
     }
 }
 
+configurations.configureEach { configuration ->
+    if (configuration.name != 'guavaJreJar') {
+        configuration.exclude(
+            group: 'com.google.guava',
+            module: 'guava'
+        )
+    }
+}
+
+// Зависимости локального сборщика APK/AAB.
+
 dependencies {
+
+    // AndroidX
     implementation 'androidx.core:core:1.13.1'
 
+    // Компилятор Java
     implementation 'org.eclipse.jdt:ecj:3.18.0'
+
+    // D8 / R8
     implementation 'com.android.tools:r8:8.7.18'
+
+    // Подпись APK
     implementation 'com.android.tools.build:apksig:8.7.3'
 
-    implementation('com.android.tools.build:bundletool:1.18.2') {
-        exclude group: 'com.google.guava', module: 'guava'
-        exclude group: 'com.google.guava', module: 'listenablefuture'
-    }
+    // Bundletool
+    implementation 'com.android.tools.build:bundletool:1.18.2'
 
+    // Protobuf
     implementation 'com.google.protobuf:protobuf-java:3.25.5'
 
+    // Guava JRE
     guavaJreJar 'com.google.guava:guava:33.3.1-jre@jar'
-    implementation files({ configurations.guavaJreJar.files })
+
+    implementation files(configurations.guavaJreJar)
+
     implementation 'com.google.guava:failureaccess:1.0.2'
 
+    // Bouncy Castle: подпись AAB
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+
     implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
 }

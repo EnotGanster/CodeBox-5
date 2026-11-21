@@ -17,6 +17,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -35,6 +36,7 @@ public class ProjectActivity extends Activity
     private static final int PICK_IMAGE = 501;
     private static final int PICK_ZIP_PROJECT = 502;
     private static final int PICK_LIBRARY = 504;
+    private static final int CREATE_ZIP_EXPORT = 505;
 
     private static final long MAX_LIBRARY_BYTES =
             100L * 1024 * 1024;
@@ -50,6 +52,7 @@ public class ProjectActivity extends Activity
     private static final int MENU_CHECK_PROJECT = 602;
     private static final int MENU_BUILD = 603;
     private static final int MENU_IMPORT_LIBRARY = 604;
+    private static final int MENU_EXPORT_ZIP = 605;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -118,6 +121,10 @@ public class ProjectActivity extends Activity
                 "📦 Импорт JAR / AAR")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
 
+        menu.add(Menu.NONE, MENU_EXPORT_ZIP, Menu.NONE,
+                "📤 Экспортировать проект в ZIP")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+
         return true;
     }
 
@@ -140,6 +147,11 @@ public class ProjectActivity extends Activity
 
         if (item.getItemId() == MENU_IMPORT_LIBRARY) {
             pickLibrary();
+            return true;
+        }
+
+        if (item.getItemId() == MENU_EXPORT_ZIP) {
+            pickProjectZipExport();
             return true;
         }
 
@@ -652,7 +664,130 @@ public class ProjectActivity extends Activity
 
         } else if (requestCode == PICK_LIBRARY) {
             importLibrary(data.getData());
+
+        } else if (requestCode == CREATE_ZIP_EXPORT) {
+            exportProjectZip(data.getData());
         }
+    }
+
+    /**
+     * Выбор файла назначения через системное окно Android.
+     * Исходные файлы проекта остаются нетронутыми.
+     */
+    private void pickProjectZipExport() {
+        if (projectDirectory == null || !projectDirectory.isDirectory()) {
+            error("Проект недоступен");
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE,
+                projectDirectory.getName() + ".zip");
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        try {
+            startActivityForResult(intent, CREATE_ZIP_EXPORT);
+        } catch (Exception e) {
+            error("Не удалось открыть сохранение ZIP: " + message(e));
+        }
+    }
+
+    /** Архивация выполняется в фоне, чтобы интерфейс не зависал. */
+    private void exportProjectZip(final Uri uri) {
+        if (uri == null || projectDirectory == null
+                || !projectDirectory.isDirectory()) {
+            error("Проект или место сохранения недоступны");
+            return;
+        }
+
+        final File root = projectDirectory;
+        final android.widget.ProgressBar progressBar =
+                new android.widget.ProgressBar(this);
+        final LinearLayout wrapper = new LinearLayout(this);
+        wrapper.setPadding(dp(24), dp(14), dp(24), dp(14));
+        wrapper.addView(progressBar);
+
+        final AlertDialog progressDialog = new AlertDialog.Builder(this)
+                .setTitle("Экспорт проекта в ZIP")
+                .setMessage("Создаётся архив «" + root.getName()
+                        + ".zip». Не закрывайте приложение.")
+                .setView(wrapper)
+                .setCancelable(false)
+                .create();
+        progressDialog.show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String success = null;
+                String failure = null;
+                boolean streamOpened = false;
+
+                try {
+                    OutputStream output = getContentResolver()
+                            .openOutputStream(uri, "w");
+                    if (output == null) {
+                        throw new IOException("Не удалось открыть целевой ZIP");
+                    }
+                    streamOpened = true;
+
+                    // exportProject() закрывает переданный поток, включая
+                    // ZIP, после успешного завершения или при исключении.
+                    CodeBoxProjectZipExporter.Result result =
+                            CodeBoxProjectZipExporter.exportProject(
+                                    root, output);
+
+                    success = "Сохранён архив «" + root.getName()
+                            + ".zip»\nФайлов: " + result.files
+                            + "\nПапок: " + result.directories
+                            + "\nРазмер исходных данных: "
+                            + result.uncompressedBytes + " байт";
+
+                } catch (Exception e) {
+                    failure = "Ошибка экспорта ZIP: " + message(e);
+                    // ACTION_CREATE_DOCUMENT создал отдельный файл.
+                    // При ошибке пробуем удалить неполный ZIP.
+                    if (streamOpened) {
+                        try {
+                            getContentResolver().delete(uri, null, null);
+                        } catch (Exception ignored) {
+                            failure += "\nПроверьте и удалите "
+                                    + "неполный ZIP вручную.";
+                        }
+                    }
+                }
+
+                final String completed = success;
+                final String failed = failure;
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (progressDialog.isShowing()) {
+                            progressDialog.dismiss();
+                        }
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
+                        if (failed != null) {
+                            new AlertDialog.Builder(ProjectActivity.this)
+                                    .setTitle("Экспорт не завершён")
+                                    .setMessage(failed)
+                                    .setPositiveButton("Понятно", null)
+                                    .show();
+                        } else {
+                            new AlertDialog.Builder(ProjectActivity.this)
+                                    .setTitle("ZIP успешно создан")
+                                    .setMessage(completed)
+                                    .setPositiveButton("Готово", null)
+                                    .show();
+                        }
+                    }
+                });
+            }
+        }, "CodeBox-ZIP-Export").start();
     }
 
     private void pickLibrary() {
@@ -1445,4 +1580,4 @@ public class ProjectActivity extends Activity
             refreshFiles();
         }
     }
-}
+                        }

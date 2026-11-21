@@ -18,6 +18,9 @@ import java.io.IOException;
 import java.util.Locale;
 
 public final class ProjectScreen {
+    // Same request code as ProjectActivity.CREATE_ZIP_EXPORT.
+    private static final int CREATE_ZIP_EXPORT = 505;
+
     public interface Listener {
         void onBack();
         void onUp();
@@ -125,7 +128,8 @@ public final class ProjectScreen {
                         "🔨 Проверить проект",
                         "📚 Библиотека кода и Gradle",
                         "📦 Импортировать ZIP-проект",
-                        "🧩 Импортировать JAR / AAR"
+                        "🧩 Импортировать JAR / AAR",
+                        "📤 Экспортировать проект в ZIP"
                 }, (dialog, which) -> {
                     if (which == 0) {
                         checkProject();
@@ -135,10 +139,37 @@ public final class ProjectScreen {
                         listener.onImportZip();
                     } else if (which == 3) {
                         pickLibraryFile();
+                    } else if (which == 4) {
+                        pickProjectZipExport();
                     }
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    /**
+     * Uses the SAF picker. ProjectActivity handles result code 505 and
+     * streams the complete project into the selected ZIP in background.
+     * Project source files are not modified.
+     */
+    private void pickProjectZipExport() {
+        if (currentProjectName == null
+                || !currentProjectName.matches("[A-Za-z][A-Za-z0-9_]{0,49}")) {
+            toast("Неверное имя проекта");
+            return;
+        }
+
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/zip");
+        intent.putExtra(Intent.EXTRA_TITLE, currentProjectName + ".zip");
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        try {
+            activity.startActivityForResult(intent, CREATE_ZIP_EXPORT);
+        } catch (Exception e) {
+            toast("Не удалось открыть сохранение ZIP: " + e.getMessage());
+        }
     }
 
     /**

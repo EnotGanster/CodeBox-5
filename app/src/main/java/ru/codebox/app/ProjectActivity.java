@@ -21,6 +21,8 @@ import java.io.OutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -37,6 +39,7 @@ public class ProjectActivity extends Activity
     private static final int PICK_ZIP_PROJECT = 502;
     private static final int PICK_LIBRARY = 504;
     private static final int CREATE_ZIP_EXPORT = 505;
+    private static final int PICK_SOURCE_FILE = 506;
 
     private static final long MAX_LIBRARY_BYTES =
             100L * 1024 * 1024;
@@ -53,6 +56,9 @@ public class ProjectActivity extends Activity
     private static final int MENU_BUILD = 603;
     private static final int MENU_IMPORT_LIBRARY = 604;
     private static final int MENU_EXPORT_ZIP = 605;
+    private static final int MENU_IMPORT_FILE = 606;
+    private static final long MAX_SOURCE_FILE_BYTES =
+            150L * 1024 * 1024;
 
     private File projectDirectory;
     private File currentDirectory;
@@ -125,6 +131,10 @@ public class ProjectActivity extends Activity
                 "📤 Экспортировать проект в ZIP")
                 .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
 
+        menu.add(Menu.NONE, MENU_IMPORT_FILE, Menu.NONE,
+                "📄 Добавить файл из Загрузок")
+                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+
         return true;
     }
 
@@ -152,6 +162,11 @@ public class ProjectActivity extends Activity
 
         if (item.getItemId() == MENU_EXPORT_ZIP) {
             pickProjectZipExport();
+            return true;
+        }
+
+        if (item.getItemId() == MENU_IMPORT_FILE) {
+            pickSourceFile();
             return true;
         }
 
@@ -667,6 +682,9 @@ public class ProjectActivity extends Activity
 
         } else if (requestCode == CREATE_ZIP_EXPORT) {
             exportProjectZip(data.getData());
+
+        } else if (requestCode == PICK_SOURCE_FILE) {
+            importSourceFile(data.getData());
         }
     }
 
@@ -788,6 +806,246 @@ public class ProjectActivity extends Activity
                 });
             }
         }, "CodeBox-ZIP-Export").start();
+    }
+
+    /**
+     * Этап 20.15.6: Импорт отдельного файла в ТЕКУЩУЮ папку проекта.
+     * Системное окно Android передаёт Uri, а имя получаем из
+     * OpenableColumns.DISPLAY_NAME. Путь и имя вручную вводить не нужно.
+     *
+     * ProjectScreen запускает этот же запрос PICK_SOURCE_FILE = 506.
+     */
+    private void pickSourceFile() {
+        if (projectDirectory == null || currentDirectory == null) {
+            error("Проект недоступен");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, PICK_SOURCE_FILE);
+        } catch (Exception e) {
+            error("Не удалось открыть выбор файла: " + message(e));
+        }
+    }
+
+    /** Читаем настоящее имя из системного поставщика документов. */
+    private String getDownloadedFileName(Uri uri) throws IOException {
+        String name = null;
+        try (Cursor cursor = getContentResolver().query(
+                uri,
+                new String[]{OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                name = cursor.getString(0);
+            }
+        } catch (Exception e) {
+            throw new IOException("Не удалось прочитать имя файла", e);
+        }
+
+        if (name == null || name.trim().isEmpty()) {
+            throw new IOException("Поставщик документов не вернул имя файла");
+        }
+        name = name.trim();
+        if (name.indexOf('/') >= 0 || name.indexOf('\\') >= 0
+                || name.equals(".") || name.equals("..")) {
+            throw new IOException("Недопустимое имя выбранного файла");
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (Character.isISOControl(c)) {
+                throw new IOException("Недопустимые символы в имени файла");
+            }
+        }
+        // Загрузки иногда добавляют .txt к исходному имени Java/XML.
+        // Пример: MainActivity.java.txt -> MainActivity.java.
+        // Обычный readme.txt оставляем readme.txt.
+        String lower = name.toLowerCase(Locale.ROOT);
+        String[] knownSuffixes = {
+                ".java.txt", ".xml.txt", ".gradle.txt",
+                ".properties.txt", ".json.txt", ".kt.txt",
+                ".kts.txt", ".groovy.txt", ".sh.txt"
+        };
+        for (String suffix : knownSuffixes) {
+            if (lower.endsWith(suffix)) {
+                name = name.substring(0, name.length() - 4);
+                break;
+            }
+        }
+        // Ограничение длины в байтах предотвращает ошибки файловой системы.
+        if (name.length() == 0 ||
+                name.getBytes("UTF-8").length > 220) {
+            throw new IOException("Слишком длинное имя файла");
+        }
+        return name;
+    }
+
+    /** Защита от выхода из проекта и подмены папок символическими ссылками. */
+    private File safeImportDestination(
+            File selectedFolder, String fileName) throws IOException {
+        if (selectedFolder == null || projectDirectory == null) {
+            throw new IOException("Проект недоступен");
+        }
+        File root = projectDirectory.getCanonicalFile();
+        File folder = selectedFolder.getCanonicalFile();
+        String rootPath = root.getCanonicalPath();
+        String folderPath = folder.getCanonicalPath();
+        if ((!folderPath.equals(rootPath) &&
+                !folderPath.startsWith(rootPath + File.separator)) ||
+                !folder.isDirectory()) {
+            throw new IOException("Папка импорта находится вне проекта");
+        }
+        File step = folder;
+        while (step != null) {
+            if (Files.isSymbolicLink(step.toPath())) {
+                throw new IOException("Символические ссылки запрещены");
+            }
+            if (step.equals(root)) break;
+            step = step.getParentFile();
+        }
+        if (step == null) {
+            throw new IOException("Недопустимая папка проекта");
+        }
+        File target = new File(folder, fileName);
+        if (!target.getCanonicalFile().getParentFile().equals(folder) ||
+                Files.isSymbolicLink(target.toPath())) {
+            throw new IOException("Недопустимый путь файла");
+        }
+        if (target.exists() && !target.isFile()) {
+            throw new IOException("Это имя уже занято папкой");
+        }
+        return target;
+    }
+
+    /** Обработчик SAF: берёт имя автоматически и показывает подтверждение замены. */
+    private void importSourceFile(final Uri uri) {
+        try {
+            if (uri == null) throw new IOException("Файл не выбран");
+            final String name = getDownloadedFileName(uri);
+            final File directory = currentDirectory;
+            final File destination = safeImportDestination(directory, name);
+            if (destination.exists()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Заменить существующий файл?")
+                        .setMessage("В этой папке уже есть «" + name
+                                + "». Заменить его содержимое файлом из Загрузок?"
+                                + "\nОстальные файлы проекта не изменятся.")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Заменить", (dialog, which) ->
+                                copySourceFileInBackground(uri, directory,
+                                        name, true))
+                        .show();
+            } else {
+                copySourceFileInBackground(uri, directory, name, false);
+            }
+        } catch (Exception e) {
+            error("Ошибка выбора файла: " + message(e));
+        }
+    }
+
+    /** Копируем сначала во временный файл; только затем заменяем оригинал. */
+    private void copySourceFileInBackground(
+            final Uri uri, final File directory,
+            final String name, final boolean replace) {
+        final android.widget.ProgressBar bar =
+                new android.widget.ProgressBar(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setPadding(dp(24), dp(12), dp(24), dp(12));
+        box.addView(bar);
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Импорт файла")
+                .setMessage("Добавление: " + name)
+                .setView(box)
+                .setCancelable(false)
+                .create();
+        dialog.show();
+
+        new Thread(new Runnable() {
+            @Override public void run() {
+                String failure = null;
+                long totalBytes = 0;
+                File temporary = null;
+                try {
+                    File destination = safeImportDestination(directory, name);
+                    if (!replace && destination.exists()) {
+                        throw new IOException("Файл уже существует");
+                    }
+                    temporary = File.createTempFile(
+                            ".codebox-import-", ".tmp", directory);
+                    try (InputStream input =
+                                 getContentResolver().openInputStream(uri);
+                         FileOutputStream output =
+                                 new FileOutputStream(temporary)) {
+                        if (input == null) {
+                            throw new IOException("Не удалось открыть исходный файл");
+                        }
+                        byte[] buffer = new byte[32768];
+                        int count;
+                        while ((count = input.read(buffer)) != -1) {
+                            totalBytes += count;
+                            if (totalBytes > MAX_SOURCE_FILE_BYTES) {
+                                throw new IOException("Файл больше 150 МБ");
+                            }
+                            output.write(buffer, 0, count);
+                        }
+                        output.getFD().sync();
+                    }
+                    // Повторная проверка перед перемещением (TOCTOU).
+                    destination = safeImportDestination(directory, name);
+                    if (!replace && destination.exists()) {
+                        throw new IOException("Файл появился во время импорта");
+                    }
+                    try {
+                        if (replace) {
+                            Files.move(temporary.toPath(), destination.toPath(),
+                                    StandardCopyOption.ATOMIC_MOVE,
+                                    StandardCopyOption.REPLACE_EXISTING);
+                        } else {
+                            Files.move(temporary.toPath(), destination.toPath(),
+                                    StandardCopyOption.ATOMIC_MOVE);
+                        }
+                    } catch (AtomicMoveNotSupportedException ignored) {
+                        if (replace) {
+                            Files.move(temporary.toPath(), destination.toPath(),
+                                    StandardCopyOption.REPLACE_EXISTING);
+                        } else {
+                            Files.move(temporary.toPath(), destination.toPath());
+                        }
+                    }
+                    temporary = null;
+                } catch (Exception e) {
+                    failure = message(e);
+                } finally {
+                    if (temporary != null) temporary.delete();
+                }
+                final String problem = failure;
+                final long bytes = totalBytes;
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (dialog.isShowing()) dialog.dismiss();
+                        if (isFinishing() || isDestroyed()) return;
+                        if (problem != null) {
+                            new AlertDialog.Builder(ProjectActivity.this)
+                                    .setTitle("Файл не импортирован")
+                                    .setMessage(problem)
+                                    .setPositiveButton("Понятно", null)
+                                    .show();
+                        } else {
+                            refreshFiles();
+                            new AlertDialog.Builder(ProjectActivity.this)
+                                    .setTitle("Файл добавлен")
+                                    .setMessage("Имя: " + name
+                                            + "\nРазмер: " + bytes + " байт"
+                                            + "\nПапка: " + directory.getName())
+                                    .setPositiveButton("Готово", null)
+                                    .show();
+                        }
+                    }
+                });
+            }
+        }, "CodeBox-File-Import").start();
     }
 
     private void pickLibrary() {
@@ -1580,4 +1838,4 @@ public class ProjectActivity extends Activity
             refreshFiles();
         }
     }
-                        }
+                      }

@@ -18,8 +18,9 @@ import java.io.IOException;
 import java.util.Locale;
 
 public final class ProjectScreen {
-    // Same request code as ProjectActivity.CREATE_ZIP_EXPORT.
+    // Request codes must match ProjectActivity for the SAF result callbacks.
     private static final int CREATE_ZIP_EXPORT = 505;
+    private static final int PICK_SOURCE_FILE = 506;
 
     public interface Listener {
         void onBack();
@@ -129,6 +130,7 @@ public final class ProjectScreen {
                         "📚 Библиотека кода и Gradle",
                         "📦 Импортировать ZIP-проект",
                         "🧩 Импортировать JAR / AAR",
+                        "📥 Добавить файл из Загрузок",
                         "📤 Экспортировать проект в ZIP"
                 }, (dialog, which) -> {
                     if (which == 0) {
@@ -140,11 +142,32 @@ public final class ProjectScreen {
                     } else if (which == 3) {
                         pickLibraryFile();
                     } else if (which == 4) {
+                        pickSourceFile();
+                    } else if (which == 5) {
                         pickProjectZipExport();
                     }
                 })
                 .setNegativeButton("Отмена", null)
                 .show();
+    }
+
+    /**
+     * Open Android's document picker to import one existing file into the
+     * CURRENT folder displayed in ProjectActivity. Request code 506 matches
+     * ProjectActivity.PICK_SOURCE_FILE. The activity reads DISPLAY_NAME and
+     * safely copies the bytes; this screen never edits project files itself.
+     */
+    private void pickSourceFile() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try {
+            activity.startActivityForResult(intent, PICK_SOURCE_FILE);
+        } catch (Exception e) {
+            toast("Не удалось выбрать файл: " + e.getMessage());
+        }
     }
 
     /**
